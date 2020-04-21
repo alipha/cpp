@@ -42,7 +42,7 @@ trampoline<long long> sum(long long n) {
         return 1;
     } else {
         auto result1 = [n]() { return sum(n - 1); };
-        return trampoline<long long>([n](int n1) { return n + n1; }, result1);
+        return trampoline<long long>([n](long long n1) { return n + n1; }, result1);
     }
 }
 
