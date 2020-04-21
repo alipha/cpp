@@ -25,6 +25,7 @@ auto transform(T1&& s, Func f)
 }
 
 
+namespace detail {
 
 struct task {
     task() = default;
@@ -37,7 +38,7 @@ struct task {
     virtual void run(std::stack<std::unique_ptr<task>> &task_stack) = 0;
 };
 
-
+}  // namespace detail
 
 
 template<typename Ret>
@@ -56,20 +57,20 @@ private:
         
         virtual ~executor_base() = default;
         
-        virtual void run(std::stack<std::unique_ptr<task>> &task_stack) = 0;
+        virtual void run(std::stack<std::unique_ptr<detail::task>> &task_stack) = 0;
         
         std::optional<Ret> *result_ptr;
     };
     
     
     template<typename Collector, typename Trampolines>
-    struct combiner : task {
+    struct combiner : detail::task {
         template<typename C, typename T>
         combiner(C &&c, T &&t, std::optional<Ret> *rp) : collect(std::forward<C>(c)), trampolines(std::forward<T>(t)), combined_result(rp) {}
         
         ~combiner() = default;
         
-        void run(std::stack<std::unique_ptr<task>> &) override {
+        void run(std::stack<std::unique_ptr<detail::task>> &) override {
             auto results = transform(trampolines, [](auto &t) { return *t.result; });
             **combined_result = std::apply(collect, results); 
         }
@@ -81,17 +82,17 @@ private:
     
     
     template<typename Trampolines>
-    struct fetcher : task {
+    struct fetcher : detail::task {
         fetcher(Trampolines *t) : trampolines(t) {}
         
         ~fetcher() = default;
         
-        void run(std::stack<std::unique_ptr<task>> &task_stack) override {
+        void run(std::stack<std::unique_ptr<detail::task>> &task_stack) override {
             std::apply([&task_stack, this](auto& ...t){ (..., this->run_trampoline(t, task_stack)); }, *trampolines);
         }
         
         template<typename T>
-        void run_trampoline(T &t, std::stack<std::unique_ptr<task>> &task_stack) {
+        void run_trampoline(T &t, std::stack<std::unique_ptr<detail::task>> &task_stack) {
             if(t.exec) {
                 t.exec->result_ptr = &t.result;
                 t.exec->run(task_stack);
@@ -111,7 +112,7 @@ private:
         
         ~executor() = default;
                 
-        void run(std::stack<std::unique_ptr<task>> &task_stack) override {
+        void run(std::stack<std::unique_ptr<detail::task>> &task_stack) override {
             trampolines trams = transform(funcs, [](auto &f) { return f(); });
             auto comb = std::make_unique<combiner<Collector, trampolines>>(std::move(collector), std::move(trams), this->result_ptr);
             auto fetch = std::make_unique<fetcher<trampolines>>(&comb->trampolines);
@@ -142,12 +143,12 @@ public:
         if(result)
             return std::move(*result);
             
-        std::stack<std::unique_ptr<task>> task_stack;
+        std::stack<std::unique_ptr<detail::task>> task_stack;
         exec->result_ptr = &result;
         exec->run(task_stack);
         
         while(!task_stack.empty()) {
-            std::unique_ptr<task> t = std::move(task_stack.top());
+            std::unique_ptr<detail::task> t = std::move(task_stack.top());
             task_stack.pop();
             t->run(task_stack);
         }
