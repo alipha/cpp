@@ -3,7 +3,7 @@
 
 #include <memory>
 #include <optional>
-#include <stack>
+#include <deque>
 #include <tuple>
 #include <utility>
 
@@ -27,6 +27,11 @@ auto transform(T1&& s, Func f)
 
 namespace detail {
 
+
+struct task;
+using tasks = std::deque<std::unique_ptr<task>>;
+
+
 struct task {
     task() = default;
     task(const task &) = delete;
@@ -35,7 +40,7 @@ struct task {
     task &operator=(task &&) = delete;
     
     virtual ~task() = default;
-    virtual void run(std::stack<std::unique_ptr<task>> &task_stack) = 0;
+    virtual void run(tasks &combiners, tasks &fetchers) = 0;
 };
 
 }  // namespace detail
@@ -57,7 +62,7 @@ private:
         
         virtual ~executor_base() = default;
         
-        virtual void run(std::stack<std::unique_ptr<detail::task>> &task_stack) = 0;
+        virtual void run(detail::tasks &combiners, detail::tasks &fetchers) = 0;
         
         std::optional<Ret> *result_ptr;
     };
@@ -70,7 +75,7 @@ private:
         
         ~combiner() = default;
         
-        void run(std::stack<std::unique_ptr<detail::task>> &) override {
+        void run(detail::tasks &, detail::tasks &) override {
             auto results = transform(trampolines, [](auto &t) { return *t.result; });
             **combined_result = std::apply(collect, results); 
         }
@@ -87,15 +92,18 @@ private:
         
         ~fetcher() = default;
         
-        void run(std::stack<std::unique_ptr<detail::task>> &task_stack) override {
-            std::apply([&task_stack, this](auto& ...t){ (..., this->run_trampoline(t, task_stack)); }, *trampolines);
+        void run(detail::tasks &combiners, detail::tasks &fetchers) override {
+            std::apply(
+                [&combiners, &fetchers, this](auto& ...t) { 
+                    (this->run_trampoline(t, combiners, fetchers), ...); 
+                }, *trampolines);
         }
         
         template<typename T>
-        void run_trampoline(T &t, std::stack<std::unique_ptr<detail::task>> &task_stack) {
+        void run_trampoline(T &t, detail::tasks &combiners, detail::tasks &fetchers) {
             if(t.exec) {
                 t.exec->result_ptr = &t.result;
-                t.exec->run(task_stack);
+                t.exec->run(combiners, fetchers);
             }
         }
         
@@ -112,13 +120,13 @@ private:
         
         ~executor() = default;
                 
-        void run(std::stack<std::unique_ptr<detail::task>> &task_stack) override {
+        void run(detail::tasks &combiners, detail::tasks &fetchers) override {
             trampolines trams = transform(funcs, [](auto &f) { return f(); });
             auto comb = std::make_unique<combiner<Collector, trampolines>>(std::move(collector), std::move(trams), this->result_ptr);
             auto fetch = std::make_unique<fetcher<trampolines>>(&comb->trampolines);
             
-            task_stack.push(std::move(comb));
-            task_stack.push(std::move(fetch));
+            combiners.push_back(std::move(comb));
+            fetchers.push_back(std::move(fetch));
         }
         
         Collector collector;
@@ -143,14 +151,38 @@ public:
         if(result)
             return std::move(*result);
             
-        std::stack<std::unique_ptr<detail::task>> task_stack;
+        detail::tasks task_stack;
         exec->result_ptr = &result;
-        exec->run(task_stack);
+        exec->run(task_stack, task_stack);
         
         while(!task_stack.empty()) {
-            std::unique_ptr<detail::task> t = std::move(task_stack.top());
-            task_stack.pop();
-            t->run(task_stack);
+            std::unique_ptr<detail::task> t = std::move(task_stack.back());
+            task_stack.pop_back();
+            t->run(task_stack, task_stack);
+        }
+        
+        return *result;
+    }
+
+    Ret run_breadth() {
+        if(result)
+            return std::move(*result);
+            
+        detail::tasks combiner_stack;
+        detail::tasks fetcher_queue;
+        exec->result_ptr = &result;
+        exec->run(combiner_stack, fetcher_queue);
+        
+        while(!fetcher_queue.empty()) {
+            std::unique_ptr<detail::task> t = std::move(fetcher_queue.front());
+            fetcher_queue.pop_front();
+            t->run(combiner_stack, fetcher_queue);
+        }
+       
+        while(!combiner_stack.empty()) {
+            std::unique_ptr<detail::task> t = std::move(combiner_stack.back());
+            combiner_stack.pop_back();
+            t->run(combiner_stack, fetcher_queue);
         }
         
         return *result;
