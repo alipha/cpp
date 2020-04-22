@@ -4,11 +4,44 @@
 #include <memory>
 #include <optional>
 #include <deque>
+#include <stdexcept>
+#include <string>
 #include <tuple>
+#include <typeinfo>
+#include <type_traits>
 #include <utility>
 
 
 namespace liph {
+
+
+template<typename DerivedRef, typename Base>
+std::enable_if_t<!std::is_pointer_v<DerivedRef>, DerivedRef> down_cast(Base &&base) {
+    static_assert(std::is_reference_v<DerivedRef>, 
+        "In down_cast<Derived>, Derived must be either a pointer or a reference");
+    
+    using Derived = std::remove_reference_t<DerivedRef>;
+    
+    Derived *p = down_cast<Derived*>(&base);
+    if(p)
+        return *p;
+    else
+        throw std::bad_cast();
+}
+
+template<typename DerivedPtr, typename Base>
+std::enable_if_t<std::is_pointer_v<DerivedPtr>, DerivedPtr> down_cast(Base *base) {
+    using Derived = std::remove_pointer_t<DerivedPtr>;
+
+    static_assert(std::is_base_of_v<Base, Derived>, "Base must be a base of Derived");
+    static_assert(std::has_virtual_destructor_v<Base>, "Base must be a polymorphic type");
+
+    if(typeid(*base) == typeid(Derived))
+        return static_cast<DerivedPtr>(base);
+    else
+        return nullptr;
+}
+
 
 
 template <size_t... indices, typename T1, typename Func>
@@ -32,6 +65,18 @@ struct task;
 using tasks = std::deque<std::unique_ptr<task>>;
 
 
+struct resolver_base {
+    resolver_base() = default;
+    resolver_base(const resolver_base &) = delete;
+    resolver_base(resolver_base &&) = delete;
+    resolver_base &operator=(const resolver_base &) = delete;
+    resolver_base &operator=(resolver_base &&) = delete;
+
+    virtual const std::type_info &type() const = 0;
+    virtual ~resolver_base() = default;
+};
+
+
 struct task {
     task() = default;
     task(const task &) = delete;
@@ -40,10 +85,17 @@ struct task {
     task &operator=(task &&) = delete;
     
     virtual ~task() = default;
-    virtual void run(tasks &combiners, tasks &fetchers) = 0;
+    virtual bool run(tasks &combiners, tasks &fetchers, resolver_base &r) = 0;
 };
 
 }  // namespace detail
+
+
+
+struct trampoline_resolver_type_mismatch : public std::logic_error {
+    trampoline_resolver_type_mismatch(const std::string &msg) : std::logic_error(msg) {}
+};
+
 
 
 template<typename Ret>
@@ -52,6 +104,22 @@ public:
     using result_type = Ret;
     
 private:
+
+    struct resolver : detail::resolver_base {
+        resolver(std::optional<Ret> *rp) : result_ptr(rp) {}
+        ~resolver() = default;
+
+        virtual const std::type_info &type() const override {
+            return typeid(Ret);
+        }
+
+        void resolve(Ret value) {
+            *result_ptr = std::move(value);
+        }
+
+        std::optional<Ret> *result_ptr;
+    };
+
         
     struct executor_base {
         executor_base() : result_ptr() {}
@@ -62,7 +130,7 @@ private:
         
         virtual ~executor_base() = default;
         
-        virtual void run(detail::tasks &combiners, detail::tasks &fetchers) = 0;
+        virtual bool run(detail::tasks &combiners, detail::tasks &fetchers, detail::resolver_base &r) = 0;
         
         std::optional<Ret> *result_ptr;
     };
@@ -71,13 +139,15 @@ private:
     template<typename Collector, typename Trampolines>
     struct combiner : detail::task {
         template<typename C, typename T>
-        combiner(C &&c, T &&t, std::optional<Ret> *rp) : collect(std::forward<C>(c)), trampolines(std::forward<T>(t)), combined_result(rp) {}
+        combiner(C &&c, T &&t, std::optional<Ret> *rp) 
+            : collect(std::forward<C>(c)), trampolines(std::forward<T>(t)), combined_result(rp) {}
         
         ~combiner() = default;
         
-        void run(detail::tasks &, detail::tasks &) override {
+        bool run(detail::tasks &, detail::tasks &, detail::resolver_base &) override {
             auto results = transform(trampolines, [](auto &t) { return *t.result; });
-            **combined_result = std::apply(collect, results); 
+            *combined_result = std::apply(collect, results); 
+            return false;
         }
 
         Collector collect;
@@ -92,18 +162,20 @@ private:
         
         ~fetcher() = default;
         
-        void run(detail::tasks &combiners, detail::tasks &fetchers) override {
-            std::apply(
-                [&combiners, &fetchers, this](auto& ...t) { 
-                    (this->run_trampoline(t, combiners, fetchers), ...); 
+        bool run(detail::tasks &combiners, detail::tasks &fetchers, detail::resolver_base &r) override {
+            return std::apply(
+                [&](auto& ...t) { 
+                    return (this->run_trampoline(t, combiners, fetchers, r) || ...); 
                 }, *trampolines);
         }
         
         template<typename T>
-        void run_trampoline(T &t, detail::tasks &combiners, detail::tasks &fetchers) {
+        bool run_trampoline(T &t, detail::tasks &combiners, detail::tasks &fetchers, detail::resolver_base &r) {
             if(t.exec) {
                 t.exec->result_ptr = &t.result;
-                t.exec->run(combiners, fetchers);
+                return t.exec->run(combiners, fetchers, r);
+            } else {
+                return false;
             }
         }
         
@@ -120,13 +192,14 @@ private:
         
         ~executor() = default;
                 
-        void run(detail::tasks &combiners, detail::tasks &fetchers) override {
+        bool run(detail::tasks &combiners, detail::tasks &fetchers, detail::resolver_base &) override {
             trampolines trams = transform(funcs, [](auto &f) { return f(); });
             auto comb = std::make_unique<combiner<Collector, trampolines>>(std::move(collector), std::move(trams), this->result_ptr);
             auto fetch = std::make_unique<fetcher<trampolines>>(&comb->trampolines);
             
             combiners.push_back(std::move(comb));
             fetchers.push_back(std::move(fetch));
+            return false;
         }
         
         Collector collector;
@@ -134,6 +207,31 @@ private:
         std::unique_ptr<fetcher<trampolines>> fetch;
         std::unique_ptr<combiner<Collector, trampolines>> comb;
     };
+
+
+    template<typename T>
+    struct resolver_executor : executor_base {
+        template<typename U>
+        resolver_executor(U &&v) : value(std::forward<U>(v)) {}
+
+        ~resolver_executor() = default;
+                
+        bool run(detail::tasks &, detail::tasks &, detail::resolver_base &r) override {
+            if(auto p = down_cast<typename trampoline<T>::resolver*>(&r)) {
+                p->resolve(std::move(value));
+                return true;
+            } else {
+                throw trampoline_resolver_type_mismatch(std::string("trampoline<T>::resolve<U>() called [with T=")
+                    + typeid(Ret).name() + " and U=" + typeid(T).name() + "], but U was expected to be "
+                    + r.type().name() + " to match the U in trampoline<U>::run()");
+            }
+        }
+
+        T value;
+    };
+    
+    
+    trampoline(std::unique_ptr<executor_base> e) : result(), exec(std::move(e)) {}
     
 public:
     template<typename R>
@@ -150,15 +248,16 @@ public:
     Ret run() {
         if(result)
             return std::move(*result);
-            
+        
+        resolver resolve(&result);
         detail::tasks task_stack;
         exec->result_ptr = &result;
-        exec->run(task_stack, task_stack);
+        exec->run(task_stack, task_stack, resolve);
         
-        while(!task_stack.empty()) {
+        while(!task_stack.empty() && !result) {
             std::unique_ptr<detail::task> t = std::move(task_stack.back());
             task_stack.pop_back();
-            t->run(task_stack, task_stack);
+            t->run(task_stack, task_stack, resolve);
         }
         
         return *result;
@@ -168,27 +267,44 @@ public:
         if(result)
             return std::move(*result);
             
+        resolver resolve(&result);
         detail::tasks combiner_stack;
         detail::tasks fetcher_queue;
         exec->result_ptr = &result;
-        exec->run(combiner_stack, fetcher_queue);
+        exec->run(combiner_stack, fetcher_queue, resolve);
         
-        while(!fetcher_queue.empty()) {
+        while(!fetcher_queue.empty() && !result) {
             std::unique_ptr<detail::task> t = std::move(fetcher_queue.front());
             fetcher_queue.pop_front();
-            t->run(combiner_stack, fetcher_queue);
+            t->run(combiner_stack, fetcher_queue, resolve);
         }
        
-        while(!combiner_stack.empty()) {
+        while(!combiner_stack.empty() && !result) {
             std::unique_ptr<detail::task> t = std::move(combiner_stack.back());
             combiner_stack.pop_back();
-            t->run(combiner_stack, fetcher_queue);
+            t->run(combiner_stack, fetcher_queue, resolve);
         }
         
         return *result;
     }
+
+    static trampoline resolve(Ret value) {
+        return trampoline(std::unique_ptr<executor_base>(
+                    std::make_unique<resolver_executor<Ret>>(std::move(value))
+        ));
+    }
+
+    template<typename T, typename U>
+    static trampoline resolve(U &&value) {
+        return trampoline<Ret>(std::unique_ptr<executor_base>(
+                    std::make_unique<resolver_executor<T>>(std::forward<U>(value))
+        ));
+    }
     
 private:
+    template<typename T>
+    friend class trampoline;
+
     std::optional<Ret> result;
     std::unique_ptr<executor_base> exec;
 };
