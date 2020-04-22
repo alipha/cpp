@@ -1,6 +1,7 @@
 #ifndef LIPH_TRAMPOLINE_HPP
 #define LIPH_TRAMPOLINE_HPP
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <deque>
@@ -10,6 +11,7 @@
 #include <typeinfo>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 
 namespace liph {
@@ -97,6 +99,34 @@ struct trampoline_resolver_type_mismatch : public std::logic_error {
 };
 
 
+template<typename Ret>
+class trampoline;
+
+
+template<typename Ret>
+class trampoline_list {
+public:
+    trampoline_list() = default;
+
+    template<typename Func>
+    void add(Func && func) { 
+        funcs.push_back(std::forward<Func>(func)); 
+    }
+
+    std::vector<trampoline<Ret>> operator()() {
+        std::vector<trampoline<Ret>> trampolines;
+        
+        for(auto &func : funcs)
+            trampolines.push_back(func());
+
+        return trampolines;
+    }
+
+private:
+    std::vector<std::function<trampoline<Ret>()>> funcs;
+};
+
+
 
 template<typename Ret>
 class trampoline {
@@ -145,10 +175,23 @@ private:
         ~combiner() = default;
         
         bool run(detail::tasks &, detail::tasks &, detail::resolver_base &) override {
-            auto results = transform(trampolines, [](auto &t) { return *t.result; });
+            auto results = transform(trampolines, transformer());
             *combined_result = std::apply(collect, results); 
             return false;
         }
+
+        struct transformer {
+            template<typename T>
+            T& operator()(trampoline<T> &t) { return *t.result; }
+
+            template<typename T>
+            std::vector<T> operator()(std::vector<trampoline<T>> &v) {
+                std::vector<T> results;
+                for(auto &t : v)
+                    results.push_back(std::move(*t.result));
+                return results;
+            }
+        };
 
         Collector collect;
         Trampolines trampolines;
@@ -177,6 +220,16 @@ private:
             } else {
                 return false;
             }
+        }
+        
+        template<typename T>
+        bool run_trampoline(std::vector<T> &v, detail::tasks &combiners, detail::tasks &fetchers, detail::resolver_base &r) {
+            for(T &t : v) {
+                if(run_trampoline(t, combiners, fetchers, r))
+                    return true;
+            }
+            
+            return false;
         }
         
         Trampolines *trampolines;

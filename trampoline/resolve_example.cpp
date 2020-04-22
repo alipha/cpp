@@ -32,7 +32,7 @@ trampoline<node*> build(std::queue<int> &values) {
 }
 
 
-trampoline<bool> display(node *n) {
+trampoline<bool> display(const node *n) {
     if(!n) {
         return false;
     } else {
@@ -47,16 +47,16 @@ trampoline<bool> display(node *n) {
 }
 
 
-trampoline<node*> search(node *n, int value) {
+trampoline<const node*> search(const node *n, int value) {
     std::cout << "Searching: " << (n ? n->value : -1) << std::endl;
     if(!n) {
         return nullptr;
     } else if(n->value == value) {
-        return trampoline<node*>::resolve(n);
+        return trampoline<const node*>::resolve(n);
     } else {
         auto result1 = [n, value]() { return search(n->left, value); };
         auto result2 = [n, value]() { return search(n->right, value); };
-        return trampoline<node*>([](auto, auto) { return nullptr; }, result1, result2);
+        return trampoline<const node*>([](auto, auto) { return nullptr; }, result1, result2);
     }
 }
 
@@ -96,7 +96,7 @@ int main() {
     display(tree).run_breadth();
     std::cout << std::endl;
 
-    node *n = search(tree, 12).run();
+    const node *n = search(tree, 12).run();
     std::cout << "Search result: " << (n ? n->value : -1) << std::endl;
 
     n = search(tree, 18).run_breadth();
