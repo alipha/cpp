@@ -11,7 +11,7 @@ trampoline<int> fibonacci(int n) {
     } else {
         auto result1 = [n]() { return fibonacci(n - 1); };
         auto result2 = [n]() { return fibonacci(n - 2); };
-        return trampoline<int>([](int n1, int n2) { return n1 + n2; }, result1, result2);
+        return trampoline([](int n1, int n2) { return n1 + n2; }, result1, result2);
         /* instead of:
         auto n1 = fibonacci(n - 1);
         auto n2 = fibonacci(n - 2);
@@ -27,7 +27,7 @@ trampoline<int> factorial(int n) {
         return 1;
     } else {
         auto result1 = [n]() { return factorial(n - 1); };
-        return trampoline<int>([n](int n1) { return n * n1; }, result1);
+        return trampoline([n](int n1) { return n * n1; }, result1);
         /* instead of:
         n1 = factorial(n - 1);
         return n * n1;
@@ -42,7 +42,7 @@ trampoline<long long> sum(long long n) {
         return 1;
     } else {
         auto result1 = [n]() { return sum(n - 1); };
-        return trampoline<long long>([n](long long n1) { return n + n1; }, result1);
+        return trampoline([n](long long n1) { return n + n1; }, result1);
     }
 }
 

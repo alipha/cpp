@@ -47,17 +47,22 @@ std::enable_if_t<std::is_pointer_v<DerivedPtr>, DerivedPtr> down_cast(Base *base
 
 
 template <size_t... indices, typename T1, typename Func>
-auto transform(T1&& s, Func f, std::index_sequence<indices...>)
+auto transform(T1&& s, Func &&f, std::index_sequence<indices...>)
 {
     return std::make_tuple(f(std::get<indices>(std::forward<T1>(s)))...);
 }
 
 template <typename T1, typename Func>
-auto transform(T1&& s, Func f)
+auto transform(T1&& s, Func &&f)
 {
     constexpr std::size_t N = std::tuple_size<std::remove_reference_t<T1>>::value;
-    return transform(std::forward<T1>(s), f, std::make_index_sequence<N>());
+    return transform(std::forward<T1>(s), std::forward<Func>(f), std::make_index_sequence<N>());
 }
+
+
+template<typename T>
+class trampoline;
+
 
 
 namespace detail {
@@ -89,6 +94,16 @@ struct task {
     virtual ~task() = default;
     virtual bool run(tasks &combiners, tasks &fetchers, resolver_base &r) = 0;
 };
+
+
+// functions aren't implemented. they're just used to get the underlying
+// type in a decltype expression
+template<typename T>
+T trampoline_type(trampoline<T>);
+
+template<typename T>
+std::vector<T> trampoline_type(std::vector<trampoline<T>>);
+
 
 }  // namespace detail
 
@@ -175,17 +190,17 @@ private:
         ~combiner() = default;
         
         bool run(detail::tasks &, detail::tasks &, detail::resolver_base &) override {
-            auto results = transform(trampolines, transformer());
-            *combined_result = std::apply(collect, results); 
+            auto results = transform(std::move(trampolines), transformer());
+            *combined_result = std::apply(collect, std::move(results)); 
             return false;
         }
 
         struct transformer {
             template<typename T>
-            T& operator()(trampoline<T> &t) { return *t.result; }
+            T operator()(trampoline<T> &&t) { return std::move(*t.result); }
 
             template<typename T>
-            std::vector<T> operator()(std::vector<trampoline<T>> &v) {
+            std::vector<T> operator()(std::vector<trampoline<T>> &&v) {
                 std::vector<T> results;
                 for(auto &t : v)
                     results.push_back(std::move(*t.result));
@@ -313,7 +328,7 @@ public:
             t->run(task_stack, task_stack, resolve);
         }
         
-        return *result;
+        return std::move(*result);
     }
 
     Ret run_breadth() {
@@ -338,7 +353,7 @@ public:
             t->run(combiner_stack, fetcher_queue, resolve);
         }
         
-        return *result;
+        return std::move(*result);
     }
 
     static trampoline resolve(Ret value) {
@@ -361,6 +376,14 @@ private:
     std::optional<Ret> result;
     std::unique_ptr<executor_base> exec;
 };
+
+
+
+template<typename Collector, typename Func1, typename... Func>
+trampoline(Collector &&c, Func1 &&f1, Func&&... f) -> trampoline<decltype(std::declval<Collector>()(
+        std::declval<decltype(detail::trampoline_type(std::declval<Func1>()()))>(),
+        std::declval<decltype(detail::trampoline_type(std::declval<Func>()()))>()...
+    ))>;
 
 
 }  // namespace liph

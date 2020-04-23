@@ -19,7 +19,7 @@ trampoline<bool> display(const tree_node &n) {
     for(const tree_node &child : n.children)
         trampolines.add([&child]() { return display(child); });
 
-    return trampoline<bool>([&n](auto &) {
+    return trampoline([&n](auto &&) {
         std::cout << n.value << std::endl;
         return false;
     }, trampolines);
@@ -32,7 +32,7 @@ trampoline<int> sum(const tree_node &n) {
     for(const tree_node &child : n.children)
         trampolines.add([&child]() { return sum(child); });
 
-    return trampoline<int>([&n](const std::vector<int> &sums) {
+    return trampoline([&n](std::vector<int> &&sums) {
         int total = n.value;
         for(const int &s : sums)
             total += s;
