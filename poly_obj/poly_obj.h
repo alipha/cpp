@@ -28,8 +28,15 @@ nothrow , nothrow , yes    , nothrow_copyable
 */
 
 
-template<typename... T>
-constexpr std::size_t max_sizeof() { return std::max({sizeof(T)...}); }
+template<typename T>
+constexpr std::size_t max_sizeof() { return sizeof(T); }
+
+
+template<typename T, typename U, typename... Rest>
+constexpr std::size_t max_sizeof() { 
+    return std::max(sizeof(T), max_sizeof<U, Rest...>()); 
+}
+
 
 
 template<typename T>
