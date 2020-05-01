@@ -6,18 +6,20 @@
 
 std::string bar_array[] = {"zero", "one", "two"};
 
-
-cached_function foo = [](int x, int y) { 
+// you probably want to use cached_function instead of basic_cached_function
+// basic_cached_function only caches the previous call.
+// cached_function caches (by default) the previous 5 calls.
+basic_cached_function foo = [](int x, int y) { 
     std::cout << "foo called: " << x + y << std::endl;
     return x + y; 
 };
 
-cached_function bar = [](const int &i) -> std::string& {
+basic_cached_function bar = [](const int &i) -> std::string& {
     std::cout << "bar called: " << bar_array[i] << std::endl;
     return bar_array[i];
 };
 
-cached_function baz = [](int *i) -> std::string& {
+basic_cached_function baz = [](int *i) -> std::string& {
     std::cout << "baz called: " << bar_array[*i] << std::endl;
     return bar_array[*i];
 };
@@ -40,6 +42,3 @@ int main() {
     std::cout << baz(&i) << std::endl;
     return 0;
 }
-
-
-// https://wandbox.org/permlink/3qDFDbeLwsfAFtx1
