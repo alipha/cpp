@@ -3,8 +3,9 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <map>
 #include <optional>
+#include <set>
+#include <utility>
 #include <tuple>
 #include <type_traits>
 
@@ -84,15 +85,6 @@ template<typename Functor>
 auto make_call_state(Functor) -> decltype(make_call_state(&Functor::operator()));
 
 
-/*
-template<typename R, typename... Args>
-struct call_state_w_counter : call_state<R, Args...> {
-    template<typename R2, typename... Args2>
-    call_state(std::size_t c, R2 &&r, Args2&&... args) : counter(c), call_state<R, Args...>(std::forward<R>(r), std::forward<Args>(args)...) {}
-
-    std::size_t counter;
-};
-*/
 
 template<typename R, typename... Args>
 bool operator<(const call_state<R, Args...> &left, const call_state<R, Args...> &right) {
@@ -121,11 +113,6 @@ class basic_cached_function {
 public:
     basic_cached_function(Functor f) : f(std::move(f)), last_call() {}
     
-    basic_cached_function(const basic_cached_function &) = delete;
-    basic_cached_function(basic_cached_function &&) = delete;
-    void operator=(const basic_cached_function &) = delete;
-    void operator=(basic_cached_function &&) = delete;
-    
     template<typename... Args>
     typename call_state_t::return_t operator()(Args&&... args) {
         std::tuple<Args&&...> arg_refs{std::forward<Args>(args)...};
@@ -146,64 +133,72 @@ private:
 template<typename Functor>
 class cached_function {
     using call_state_t = decltype(detail::make_call_state(std::declval<Functor>()));
-    
+    using call_set = std::set<call_state_t, std::less<>>;
+
 public:
-    cached_function(std::size_t max, Functor f) : max_size(max), counter(0), f(std::move(f)), calls() {}
-    cached_function(Functor f) : max_size(50), counter(0), f(std::move(f)), calls() {}
-    
-    cached_function(const cached_function &) = delete;
-    cached_function(cached_function &&) = delete;
-    void operator=(const cached_function &) = delete;
-    void operator=(cached_function &&) = delete;
+    cached_function(std::size_t max, Functor f) : max_size(max / 2), f(std::move(f)) {}
+    cached_function(Functor f) : f(std::move(f)) {}
     
     template<typename... Args>
     typename call_state_t::return_t operator()(Args&&... args) {
         std::tuple<Args&&...> arg_refs{std::forward<Args>(args)...};
         
-        auto it = calls.find(arg_refs);
+        auto it = (this->*new_calls).find(arg_refs);
 
-        if(it == calls.end()) {
+        bool in_new = (it != (this->*new_calls).end());
+        if(!in_new)
+            it = (this->*old_calls).find(arg_refs);
+
+        if(!in_new && it == (this->*old_calls).end()) {  // if not in either
             call_state_t call(f(std::forward<Args>(args)...), std::forward<Args>(args)...);
-            it = calls.try_emplace(call, counter++).first;
 
-            if(calls.size() > max_size)
-                expire();
-        } else if(it->second < counter - max_size / 4) {
-            it->second = counter++;
-        }
+            if(fill_new())
+                it = (this->*new_calls).insert(std::move(call)).first;
+            else
+                it = (this->*old_calls).insert(std::move(call)).first;
+        } else if(!in_new && fill_new()) {
+            // if call needs to be moved from old to new
+            call_state_t call = std::move((this->*old_calls).extract(it).value());
+            it = (this->*new_calls).insert(std::move(call)).first;
+        } // if in new, do nothing. (or in old and doesn't need to be moved) just return it
             
-        return it->first.get_return_value();
+        auto ret = it->get_return_value();
+
+        if((this->*new_calls).size() > max_size)
+            expire();
+
+        return ret;
     }
 
     void set_max_size(std::size_t max) {
-        max_size = max;
+        max_size = max / 2;
 
-        if(calls.size() > max_size)
+        if(calls1.size() + calls2.size() > max)
             expire();
     }
 
     void expire_all() {
-        calls.clear();
-        counter = 0;
+        calls1.clear();
+        calls2.clear();
     }
    
     // only leave the most recent calls 
     void expire() {
-        std::int64_t cutoff = counter - max_size / 2;
-
-        for(auto it = calls.begin(); it != calls.end(); ) {
-            if(it->second < cutoff)
-                it = calls.erase(it);
-            else
-                ++it;
-        }
+        (this->*old_calls).clear();
+        std::swap(old_calls, new_calls);
     }
 
 private:
-    std::size_t max_size;
-    std::int64_t counter;
+    bool fill_new() const {
+        return !(this->*new_calls).empty() || (this->*old_calls).size() >= max_size;
+    }
+
+    std::size_t max_size = 25;
     Functor f;
-    std::map<call_state_t, std::int64_t, std::less<>> calls;
+    call_set calls1;
+    call_set calls2;
+    call_set cached_function::*new_calls = &cached_function::calls1;
+    call_set cached_function::*old_calls = &cached_function::calls2;
 };
 
 #endif
