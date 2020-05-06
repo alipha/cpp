@@ -16,12 +16,28 @@ bool is_running = false;
 
 
 struct mark_reachable_action : action {
-    bool detail_perform(detail::node &node) override { return node.mark_reachable(); }
+    bool detail_perform(detail::node *node) override { return node->mark_reachable(); }
 };
 
 
-struct free_zero_refs_action : action {
-    bool detail_perform(detail::node &node) override {
+struct free_action : action {
+    free_action(std::size_t d) : depth(d) {}
+
+    bool detail_perform(detail::node *node) override {
+        if(node->ref_count > 1)
+            return false;
+
+        node->list_remove();
+
+        if(depth > 50) {
+            node->list_insert(delayed_free_head);
+        } else {
+            free_action child_action(depth + 1);
+            node->transverse_children(child_action);
+            delete node;
+        }
+
+        return true;
     }
 
     std::size_t depth;
@@ -31,7 +47,7 @@ struct free_zero_refs_action : action {
 void mark_reachable(node *ptr) {
     mark_reachable_action act;
 
-    if(act.detail_perform(*ptr))
+    if(!act.detail_perform(*ptr))
         return; //ptr->mark_reachable();
     
     node *old_head = reachable_head.next;
@@ -86,7 +102,7 @@ void free_unreachable() {
 }
 
 
-void delete_list() {   // TODO: revisit
+void delete_list(node &head, bool check_delayed) {   // TODO: not exception safe :-/
     node *next = head.next;
     head.next = &head;
     head.prev = &head;
@@ -105,26 +121,21 @@ void delete_list() {   // TODO: revisit
 bool node::mark_reachable() {
     if(reachable) {
         ++ref_count;
-        return true;
+        return false;
     }
 
     ref_count = 1;
     reachable = true;
     list_remove();
     list_insert(reachable_head);
-    return false;
+    return true;
 }
 
 
 void node::free() {
-    list_remove();
-
-    if(undelayed_free_count < 1000) {
-        ++undelayed_free_count;
-        delete this;
-    } else {
-        list_insert(delayed_free_head);
-    }
+    gc_running = true;
+    free_action action(0);
+    gc_running = false;
 }
 
 
@@ -137,7 +148,7 @@ void collect() {
     anchor_node *node = anchor_head.next;
 
     while(node != &anchor_head) {
-        mark_reachable(node->n);
+        mark_reachable(node->get_node());
         node = node->next;
     }
 

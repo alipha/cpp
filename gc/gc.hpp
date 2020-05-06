@@ -2,11 +2,15 @@
 #define LIPH_GC_HPP
 
 #include "gc_detail.hpp"
+#include <utility>
 #include <type_traits>
 
 
 // TODO: const correctness?
 // TODO: use allocators?
+// TODO: separate node from T
+// TODO: add before_destroy
+// TODO: exception safe
 
 
 namespace gc {
@@ -25,7 +29,7 @@ struct action {
             operator()(obj);
     }
 
-    virtual bool detail_perform(detail::node &node); // { node.mark_reachable(); }
+    virtual bool detail_perform(detail::node *node); // { node.mark_reachable(); }
 };
 
 
@@ -46,15 +50,40 @@ struct transverse_children {
 template<typename T, typename Transverse = transverse_children<T>>
 class ptr {
 public:
-    gc_ptr() { // TODO:
+    ptr() : p(nullptr) {}
+
+    template<typename... Args>
+    ptr(std::in_place_t, Args&&... args) 
+        : p(new detail::object<T, Transverse>(std::forward<Args>(args)...)) {}
+
+    ptr(const ptr &other) : p(other.p) { ++p->ref_count; }
+    ptr(ptr &&other) : p(other.p) { other.p = nullptr; }
+
+    ptr &operator=(const ptr &other) {
+        reset();
+        p = other.p;
+        ++p->ref_count;
+        return *this;
     }
 
-    gc_ptr operator=() {  // TODO:
+    ptr &operator=(ptr &&other) {
+        reset();
+        p = other.p;
+        other.p = nullptr;
+        return *this;
     }
 
-    ~gc_ptr() {
-        if(!gc_running && !--ptr->ref_count)
-            ptr->free();
+    ~ptr() { reset(); }
+
+    void reset() {
+        if(p && !detail::is_running && !--p->ref_count)
+            p->free();
+        p = nullptr;
+    }
+
+    template<typename... Args>
+    static ptr make(Args&&... args) {
+        return 
     }
     
 private:
@@ -62,15 +91,36 @@ private:
 };
 
 
-template<typename T>
+template<typename T, typename Transverse = transverse_children<T>>
 class anchor_ptr : public detail::anchor_node {
 public:
+    anchor_ptr() = default;
+
+    anchor_ptr(const ptr<T, Transverse> &p) : p(p) {}
+    anchor_ptr(ptr<T, Transverse> &&p) : p(std::move(p)) {}
+
+    anchor_ptr(const anchor_ptr &other) : detail::anchor_node(), p(other.p) {}
+    anchor_ptr(anchor_ptr &&other) : detail::anchor_node(), p(std::move(other.p)) {}
+
+    anchor_ptr &operator=(const anchor_ptr &other) {
+        p = other.p;
+        return *this;
+    }
     
+    anchor_ptr &operator=(anchor_ptr &&other) {
+        p = std::move(other.p);
+        return *this;
+    }
+
+protected:
+    node *get_node() override { return p.p; } 
+
 private:
     ptr<T> p;
 };
 
 
+template<typename T, typename Transverse = transverse_children<T>, typename A
 }  // namespace gc
 
 #endif

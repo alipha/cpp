@@ -55,6 +55,11 @@ struct list_node {
     list_node() {}
     list_node(Node *n, Node *p) : next(n), prev(p) {}
 
+    list_node(const list_node &) = delete;
+    list_node(list_node &&) = delete;
+    list_node &operator=(const list_node &) = delete;
+    list_node &operator=(list_node &&) = delete;
+
     void list_insert(Node &head) {
         head.next->prev = this;
         next = head.next;
@@ -75,18 +80,11 @@ struct list_node {
 struct node : list_node<node> {
     node() { list_insert(head); }
     node(sentinel) : list_node(this, this) {}
-
     virtual ~node() {}
-
-    node(const node &) = delete;
-    node(node &&) = delete;
-    node &operator=(const node &) = delete;
-    node &operator=(node &&) = delete;
 
     virtual void transverse_children(action &act) = 0;
 
     bool mark_reachable();
-
     void free();
 
     std::size_t ref_count = 0;
@@ -97,7 +95,8 @@ struct node : list_node<node> {
 
 template<typename T, typename Transverse>
 struct object : node {
-    using node::node;
+    template<typename... Args>
+    object(Args&&... args) : node(), value(std::forward<Args>(args)...) {}
 
     void transverse_children(action &act) override { Transverse()(value, act); }
 
@@ -106,10 +105,13 @@ struct object : node {
 
 
 struct anchor_node : list_node<anchor_node> {
-    anchor_node(node *n) : n(n) { list_insert(anchor_head); }
-    anchor_node(sentinel) : n(nullptr), list_node(this, this) {}
+    anchor_node() { list_insert(anchor_head); }
+    anchor_node(sentinel) : list_node(this, this) {}
 
-    node *n;
+    ~anchor_node() { list_remove(); }
+
+protected:
+    virtual node *get_node() = 0;
 };
 
 
