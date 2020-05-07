@@ -1,5 +1,9 @@
 #include "gc.hpp"
 
+#ifdef DEBUG
+using namespace std::string_literals;
+#endif
+
 
 namespace gc {
 
@@ -7,31 +11,80 @@ namespace gc {
 namespace detail {
 
 
-node head{sentinel()};
+node active_head{sentinel()};
 node delayed_free_head{sentinel()};
 node reachable_head{sentinel()};
 anchor_node anchor_head{sentinel()};
 bool is_running = false;
 
 
+void debug_not_head(node *n, node *allowed_head) {
+    if(!debug)
+        return;
+    if(!n)
+        throw std::logic_error("debug_not_head: node is null");
+    if(n == allowed_head)
+        return;
+
+    if(n == &active_head)
+        throw std::logic_error("node is active_head");
+    if(n == &delayed_free_head)
+        throw std::logic_error("node is delayed_free_head");
+    if(n == &reachable_head)
+        throw std::logic_error("node is reachable_head");
+}
+
+
 struct mark_reachable_action : action {
-    bool detail_perform(detail::node *node) override { return node->mark_reachable(); }
+    // returning true means: did i do something? false means it was already marked
+    bool detail_perform(detail::node *node) override { 
+        if(debug && !node)
+            throw std::logic_error("mark_reachable_action: null");
+        return node->mark_reachable(); 
+    }
+};
+
+// for debug only
+struct dec_ref_action : action {
+    bool detail_perform(detail::node *node) override { 
+        if(!node)
+            throw std::logic_error("dec_ref_action: null");
+        if(node->ref_count == 0)
+            debug_error("dec_ref_action: ref_count is 0");
+        else
+            --node->ref_count;
+        return true;
+    } 
 };
 
 
 struct free_action : action {
     free_action(std::size_t d) : depth(d) {}
 
+    // returning true means: did i do something? false means this object is not ready to be freed (ref_count > 0)
     bool detail_perform(detail::node *node) override {
+        if(debug && !node)
+            throw std::logic_error("free_action: null");
+
         if(node->ref_count > 1) {
             --node->ref_count;
             return false;
+        }
+
+        if(debug) {
+            if(depth > 0 && node->ref_count != 1)
+                debug_error("free_action: refcount is not 1!");
+            if(depth == 0 && node->ref_count != 0)
+                debug_error("free_action: refcount is not 0!");
+            
+            node->ref_count = 0;
         }
 
         node->list_remove();
         node->before_destroy();
 
         if(depth > 50) {
+            debug_out("depth: " << depth);
             node->list_insert(delayed_free_head);
         } else {
             free_action child_action(depth + 1);
@@ -58,9 +111,11 @@ void transverse_and_mark_reachable(node *ptr) {
     node *new_head = reachable_head.next;
 
     while(old_head != new_head) {
+        debug_out("start transverse_and_mark loop");
         node *node = new_head;
 
         while(node != old_head) {
+            debug_not_head(node, nullptr);
             node->transverse(act);
             node = node->next;
         }
@@ -75,13 +130,18 @@ void free_delayed() {
     free_action act(0);
 
     while(delayed_free_head.next != &delayed_free_head) {
+        debug_out("start free_delayed loop");
         node *next = delayed_free_head.next;
         delayed_free_head.next = &delayed_free_head;
         delayed_free_head.prev = &delayed_free_head;
 
         while(next != &delayed_free_head) {
+            debug_not_head(next, nullptr);
             node *current = next;
             next = next->next;
+
+            if(debug && current->ref_count != 0)
+                debug_error("free_delayed: refcount is not 0!");
             current->transverse(act);
             delete current;
         }
@@ -91,23 +151,32 @@ void free_delayed() {
 
 void free_unreachable() {
     is_running = true;
-    delete_list(head);
+    delete_list(active_head);
     is_running = false;
 
     if(reachable_head.next != &reachable_head) {
-        head.next = reachable_head.next;
-        head.prev = reachable_head.prev;
-        head.next->prev = &head;
-        head.prev->next = &head;
+        debug_out("still reachable nodes");
+        active_head.next = reachable_head.next;
+        active_head.prev = reachable_head.prev;
+        active_head.next->prev = &active_head;
+        active_head.prev->next = &active_head;
+        debug_not_head(active_head.next, nullptr);
+        debug_not_head(active_head.prev, nullptr);
+
         reachable_head.next = &reachable_head;
         reachable_head.prev = &reachable_head;
     } else {
-        head.next = &head;
-        head.prev = &head;
+        debug_out("no reachable nodes");
+        active_head.next = &active_head;
+        active_head.prev = &active_head;
     }
 
-    node *n = head.next;
-    while(n != &head) {
+    debug_out("free_unreachable: setting reachable = false");
+    node *n = active_head.next;
+    while(n != &active_head) {
+        debug_not_head(n, nullptr);
+        if(debug && !n->reachable)
+            debug_error("free_unreachable: n is not reachable");
         n->reachable = false;
         n = n->next;
     }
@@ -115,10 +184,15 @@ void free_unreachable() {
 
 
 void delete_list(node &head) {
+    dec_ref_action dec_action;
     node *next = head.next;
 
+    debug_out("call before_destroy");
     while(next != &head) {
+        debug_not_head(next, nullptr);
         next->before_destroy();
+        if(debug)
+            next->transverse(dec_action);
         next = next->next;
     }
 
@@ -126,7 +200,12 @@ void delete_list(node &head) {
     //head.next = &head;
     //head.prev = &head;
 
+    debug_out("deleting list");
     while(next != &head) {
+        debug_not_head(next, nullptr);
+        if(debug && next->ref_count != 0)
+            debug_error("unreachable ref_count = " + std::to_string(next->ref_count));
+
         node *current = next;
         next = next->next;
         delete current;
@@ -150,8 +229,12 @@ bool node::mark_reachable() {
 
 void node::free() {
     is_running = true;
+
+    if(debug && ref_count != 0)
+        throw std::logic_error("free: refcount is not 0!");
     free_action(0).detail_perform(this);
     free_delayed();
+
     is_running = false;
 }
 
@@ -164,11 +247,13 @@ void collect() {
     detail::mark_reachable_action act;
     detail::anchor_node *node = detail::anchor_head.next;
 
+    debug_out("collect: marking reachables");
     while(node != &detail::anchor_head) {
         detail::transverse_and_mark_reachable(node->detail_get_node());
         node = node->next;
     }
 
+    debug_out("collect: freeing unreachables");
     detail::free_unreachable();
 }
 

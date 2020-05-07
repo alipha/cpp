@@ -5,19 +5,46 @@
 #include <iterator>
 #include <type_traits>
 #include <utility>
+#include <variant>
+
+#ifdef DEBUG
+#include <stdexcept>
+#include <string>
+#endif
+
+#ifdef DEBUG_OUT
+#include <iostream>
+
+#define debug_out(x) do { std::cerr << "DEBUG: " << x << std::endl; } while(0)
+#define debug_error(x) do { std::cerr << "ERROR: " << x << std::endl; } while(0)
+#else
+#define debug_out(x) do {} while(0)
+#define debug_error(x) do {} while(0)
+#endif
+
+constexpr bool debug = false
+#ifdef DEBUG
+    || true
+#endif
+    ;
 
 
 namespace gc {
+
+struct action;
 
 
 namespace detail {
 
 
+using std::begin;
+using std::end;
+
 template<typename T, typename = std::void_t<>>
 constexpr bool is_container_v = false;
 
 template<typename T>
-constexpr bool is_container_v<T, std::void_t<decltype(std::begin(std::declval<T>()), std::end(std::declval<T>()))>> = true;
+constexpr bool is_container_v<T, std::void_t<decltype(begin(std::declval<T>()), end(std::declval<T>()))>> = true;
 
 
 template<typename T, typename = std::void_t<>>
@@ -28,9 +55,6 @@ constexpr bool has_before_destroy_v<T, std::void_t<decltype(std::declval<T>().be
 
 
 }  // namespace detail
-
-
-struct action;
 
 
 template<typename T>
@@ -46,6 +70,28 @@ struct transverse {
             transverse<decltype(obj)>()(obj, act); 
     }
 };
+
+
+template<typename T, typename = std::void_t<>>
+constexpr bool can_transverse_v = false;
+
+template<typename T>
+constexpr bool can_transverse_v<T, std::void_t<decltype(transverse<T>()(std::declval<T>(), std::declval<action>()))>> = true;
+
+
+template<typename... T>
+struct transverse<std::variant<T...>> {
+    void operator()(std::variant<T...> &v, action &act) {
+        std::visit([&act](auto &&obj) {
+            if constexpr(can_transverse_v<decltype(obj)>) {
+                transverse<decltype(obj)>()(obj, act);
+            }
+        }, v);
+    }
+};
+
+template<typename... T>
+struct transverse<std::variant<T...>&> : transverse<std::variant<T...>> {};
 
 
 template<typename T>
@@ -74,13 +120,14 @@ struct anchor_node;
 struct sentinel {};
 
 
-extern node head;
+extern node active_head;
 extern node delayed_free_head;
 extern node reachable_head;
 extern anchor_node anchor_head;
 extern bool is_running;
 
 
+void debug_not_head(node *n, node *allowed_head);
 void mark_reachable(node *ptr);
 void free_delayed();
 void free_unreachable();
@@ -116,17 +163,23 @@ struct list_node {
 
 
 struct node : list_node<node> {
-    node() noexcept { list_insert(head); }
+    node() noexcept { list_insert(active_head); }
     node(sentinel) noexcept : list_node(this, this) {}
     virtual ~node() {}
 
     virtual void transverse(action &) {}
     virtual void before_destroy() {}
 
+    void list_remove() {
+        if(debug)
+            debug_not_head(this, nullptr);
+        list_node<node>::list_remove();
+    }
+
     bool mark_reachable();
     void free();
 
-    std::size_t ref_count = 0;
+    std::size_t ref_count = 1;
     bool reachable = false;
 };
 
@@ -150,7 +203,13 @@ struct anchor_node : list_node<anchor_node> {
 
     ~anchor_node() { list_remove(); }
 
-    virtual node *detail_get_node() noexcept { return nullptr; }
+    virtual node *detail_get_node() noexcept(!debug) { 
+#ifdef DEBUG
+        throw std::logic_error("anchor_node::detail_get_node called");
+#else
+        return nullptr; 
+#endif
+    }
 };
 
 

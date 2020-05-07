@@ -40,18 +40,25 @@ public:
     using element_type = T;
 
     ptr() noexcept : p(nullptr) {}
+    ptr(std::nullptr_t) noexcept : p(nullptr) {}
 
     template<typename... Args>
-    ptr(std::in_place_t, Args&&... args) 
+    explicit ptr(std::in_place_t, Args&&... args) 
         : p(create_object(std::forward<Args>(args)...)) {}
 
-    ptr(const ptr &other) noexcept : p(other.p) { ++p->ref_count; }
+    ptr(const ptr &other) noexcept : p(other.p) { if(p) ++p->ref_count; }
     ptr(ptr &&other) noexcept : p(other.p) { other.p = nullptr; }
+
+    ptr &operator=(std::nullptr_t) {
+        reset();
+        return *this;
+    }
 
     ptr &operator=(const ptr &other) {
         reset();
         p = other.p;
-        ++p->ref_count;
+        if(p)
+            ++p->ref_count;
         return *this;
     }
 
@@ -69,14 +76,20 @@ public:
     T *get() const noexcept { return p ? &p->value : nullptr; }
 
     T *operator->() const noexcept { return get(); }
-    T &operator*() const noexcept { return p->value; }
+    T &operator*() const noexcept(!debug) { 
+#ifdef DEBUG
+        if(!p)
+            throw std::logic_error("dereferencing null gc::ptr");
+#endif
+        return p->value; 
+    }
     
     std::size_t use_count() const noexcept { return p ? p->ref_count : 0; }
 
     void swap(ptr &other) noexcept { std::swap(p, other.p); }
 
     void reset() {
-        if(p && !detail::is_running && !--p->ref_count)
+        if(p && !detail::is_running && --p->ref_count == 0)
             p->free();
         p = nullptr;
     }
@@ -89,6 +102,7 @@ protected:
         try {
             return new detail::object<T>(std::forward<Args>(args)...);
         } catch(std::bad_alloc &) {
+            debug_out("gc::collect on std::bad_alloc");
             gc::collect();
             return new detail::object<T>(std::forward<Args>(args)...);
         }
@@ -103,22 +117,22 @@ template<typename T>
 class anchor_ptr : public ptr<T>, public detail::anchor_node {
 public:
     anchor_ptr() noexcept = default;
+    anchor_ptr(std::nullptr_t) noexcept : ptr<T>(), detail::anchor_node() {}
 
     template<typename... Args>
-    anchor_ptr(std::in_place_t i, Args&&... args) : ptr<T>(i, std::forward<Args>(args)...), detail::anchor_node() {}
+    explicit anchor_ptr(std::in_place_t i, Args&&... args) : ptr<T>(i, std::forward<Args>(args)...), detail::anchor_node() {}
 
-    anchor_ptr(const ptr<T> &p) noexcept : ptr<T>(p), detail::anchor_node() {}
-    anchor_ptr(ptr<T> &&p) noexcept : ptr<T>(std::move(p)), detail::anchor_node() {}
+    anchor_ptr(ptr<T> p) noexcept : ptr<T>(std::move(p)), detail::anchor_node() {}
 
     anchor_ptr(const anchor_ptr &other) noexcept : ptr<T>(other), detail::anchor_node() {}
     anchor_ptr(anchor_ptr &&other) noexcept : ptr<T>(std::move(other)), detail::anchor_node() {}
 
-    anchor_ptr &operator=(const ptr<T> &other) {
-        ptr<T>::operator=(other);
+    anchor_ptr &operator=(std::nullptr_t) {
+        ptr<T>::operator=(nullptr);
         return *this;
     }
-    
-    anchor_ptr &operator=(ptr<T> &&other) {
+
+    anchor_ptr &operator=(ptr<T> other) {
         ptr<T>::operator=(std::move(other));
         return *this;
     }
