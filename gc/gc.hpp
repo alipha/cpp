@@ -2,6 +2,9 @@
 #define LIPH_GC_HPP
 
 #include "gc_detail.hpp"
+#include <cstddef>
+#include <functional>
+#include <new>
 #include <utility>
 #include <type_traits>
 
@@ -9,55 +12,31 @@
 // TODO: const correctness?
 // TODO: use allocators?
 // TODO: separate node from T
-// TODO: add before_destroy
 // TODO: exception safe
+// TODO: support T[]
+// TODO: gc::anchor
+// TODO: weak_ptr
 
 
 namespace gc {
-
+ 
 
 void collect();
 
 
-struct action {
-    template<typename T>
-    void operator()(ptr<T> &p) { detail_perform(p.p); }
-
-    template<typename T>
-    std::enable_if_t<detail::is_container_v<T>> operator()(T &container) {
-        for(auto &obj : container)
-            operator()(obj);
-    }
-
-    virtual bool detail_perform(detail::node *node); // { node.mark_reachable(); }
-};
-
-
 template<typename T>
-struct transverse_children {
-    template<typename U = T>
-    std::enable_if_t<!detail::is_container_v<U>> operator()(T &obj, action &act) { 
-        obj.transverse_children(act); 
-    }
-    
-    template<typename U = T>
-    std::enable_if_t<detail::is_container_v<U>> operator()(T &container, action &act) {
-       act(container); 
-    }
-};
-
-
-template<typename T, typename Transverse = transverse_children<T>>
 class ptr {
 public:
-    ptr() : p(nullptr) {}
+    using element_type = T;
+
+    ptr() noexcept : p(nullptr) {}
 
     template<typename... Args>
     ptr(std::in_place_t, Args&&... args) 
-        : p(new detail::object<T, Transverse>(std::forward<Args>(args)...)) {}
+        : p(create_object(std::forward<Args>(args)...)) {}
 
-    ptr(const ptr &other) : p(other.p) { ++p->ref_count; }
-    ptr(ptr &&other) : p(other.p) { other.p = nullptr; }
+    ptr(const ptr &other) noexcept : p(other.p) { ++p->ref_count; }
+    ptr(ptr &&other) noexcept : p(other.p) { other.p = nullptr; }
 
     ptr &operator=(const ptr &other) {
         reset();
@@ -75,53 +54,153 @@ public:
 
     ~ptr() { reset(); }
 
+    explicit operator bool() const noexcept { return p; }
+
+    T *get() const noexcept { return p ? &p->value : nullptr; }
+
+    T *operator->() const noexcept { return get(); }
+    T &operator*() const noexcept { return p->value; }
+    
+    std::size_t use_count() const noexcept { return p ? p->ref_count : 0; }
+
+    void swap(ptr &other) noexcept { std::swap(p, other.p); }
+
     void reset() {
         if(p && !detail::is_running && !--p->ref_count)
             p->free();
         p = nullptr;
     }
 
+protected:
+    friend struct action;
+
     template<typename... Args>
-    static ptr make(Args&&... args) {
-        return 
+    static detail::object<T> *create_object(Args&&... args) {
+        try {
+            return new detail::object<T>(std::forward<Args>(args)...);
+        } catch(std::bad_alloc &) {
+            gc::collect();
+            return new detail::object<T>(std::forward<Args>(args)...);
+        }
     }
-    
-private:
-    detail::object<T, Transverse> *p;
+
+    detail::object<T> *p;
 };
 
 
-template<typename T, typename Transverse = transverse_children<T>>
-class anchor_ptr : public detail::anchor_node {
+
+template<typename T>
+class anchor_ptr : public ptr<T>, public detail::anchor_node {
 public:
-    anchor_ptr() = default;
+    anchor_ptr() noexcept = default;
 
-    anchor_ptr(const ptr<T, Transverse> &p) : p(p) {}
-    anchor_ptr(ptr<T, Transverse> &&p) : p(std::move(p)) {}
+    template<typename... Args>
+    anchor_ptr(std::in_place_t i, Args&&... args) : ptr<T>(i, std::forward<Args>(args)...), detail::anchor_node() {}
 
-    anchor_ptr(const anchor_ptr &other) : detail::anchor_node(), p(other.p) {}
-    anchor_ptr(anchor_ptr &&other) : detail::anchor_node(), p(std::move(other.p)) {}
+    anchor_ptr(const ptr<T> &p) noexcept : ptr<T>(p), detail::anchor_node() {}
+    anchor_ptr(ptr<T> &&p) noexcept : ptr<T>(std::move(p)), detail::anchor_node() {}
+
+    anchor_ptr(const anchor_ptr &other) noexcept : ptr<T>(other), detail::anchor_node() {}
+    anchor_ptr(anchor_ptr &&other) noexcept : ptr<T>(std::move(other)), detail::anchor_node() {}
+
+    anchor_ptr &operator=(const ptr<T> &other) {
+        ptr<T>::operator=(other);
+        return *this;
+    }
+    
+    anchor_ptr &operator=(ptr<T> &&other) {
+        ptr<T>::operator=(std::move(other));
+        return *this;
+    }
 
     anchor_ptr &operator=(const anchor_ptr &other) {
-        p = other.p;
+        ptr<T>::operator=(other);
         return *this;
     }
     
     anchor_ptr &operator=(anchor_ptr &&other) {
-        p = std::move(other.p);
+        ptr<T>::operator=(std::move(other));
         return *this;
     }
+    
+    void swap(anchor_ptr &other) noexcept { ptr<T>::swap(other); }
 
-protected:
-    node *get_node() override { return p.p; } 
 
-private:
-    ptr<T> p;
+    detail::node *detail_get_node() noexcept override { return ptr<T>::p; } 
 };
 
 
-template<typename T, typename Transverse = transverse_children<T>, typename A
+
+template<typename T>
+bool operator==(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() == right.get(); }
+
+template<typename T>
+bool operator!=(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() != right.get(); }
+
+template<typename T>
+bool operator<(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() < right.get(); }
+
+template<typename T>
+bool operator<=(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() <= right.get(); }
+
+template<typename T>
+bool operator>(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() > right.get(); }
+
+template<typename T>
+bool operator>=(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() >= right.get(); }
+
+
+
+template<typename T, typename... Args>
+ptr<T> make_ptr(Args&&... args) {
+    return ptr<T>(std::in_place_t(), std::forward<Args>(args)...); 
+}
+
+
+template<typename T, typename... Args>
+anchor_ptr<T> make_anchor_ptr(Args&&... args) {
+    return anchor_ptr<T>(std::in_place_t(), std::forward<Args>(args)...); 
+}
+
+
+
+struct action {
+    template<typename T>
+    void operator()(ptr<T> &p) { detail_perform(p.p); }
+
+    template<typename T>
+    std::enable_if_t<detail::is_container_v<T>> operator()(T &container) {
+        for(auto &obj : container)
+            operator()(obj);
+    }
+
+    virtual bool detail_perform(detail::node *node) = 0;
+};
+
+
 }  // namespace gc
+
+
+
+namespace std {
+
+    template<typename T>
+    void swap(gc::ptr<T> &left, gc::ptr<T> &right) noexcept { left.swap(right); }
+
+    template<typename T>
+    void swap(gc::anchor_ptr<T> &left, gc::anchor_ptr<T> &right) noexcept { left.swap(right); }
+
+    template<typename T>
+    struct hash<gc::ptr<T>> {
+        std::size_t operator()(const gc::ptr<T> &p) const { return std::hash<T*>()(p.get()); }
+    };
+
+    template<typename T>
+    struct hash<gc::anchor_ptr<T>> {
+        std::size_t operator()(const gc::anchor_ptr<T> &p) const { return std::hash<T*>()(p.get()); }
+    };
+
+}  // namespace std
 
 #endif
 

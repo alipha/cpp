@@ -10,13 +10,58 @@
 namespace gc {
 
 
-struct action;
+namespace detail {
+
+
+template<typename T, typename = std::void_t<>>
+constexpr bool is_container_v = false;
 
 template<typename T>
-struct transverse_children;
+constexpr bool is_container_v<T, std::void_t<decltype(std::begin(std::declval<T>()), std::end(std::declval<T>()))>> = true;
 
-template<typename T, typename Transverse = transverse_children<T>>
-class ptr;
+
+template<typename T, typename = std::void_t<>>
+constexpr bool has_before_destroy_v = false;
+
+template<typename T>
+constexpr bool has_before_destroy_v<T, std::void_t<decltype(std::declval<T>().before_destroy())>> = true;
+
+
+}  // namespace detail
+
+
+struct action;
+
+
+template<typename T>
+struct transverse {
+    template<typename U = T>
+    std::enable_if_t<!detail::is_container_v<U>> operator()(T &obj, action &act) { 
+        obj.transverse(act); 
+    }
+    
+    template<typename U = T>
+    std::enable_if_t<detail::is_container_v<U>> operator()(T &container, action &act) {
+        for(auto &obj : container)
+            transverse<decltype(obj)>()(obj, act); 
+    }
+};
+
+
+template<typename T>
+struct before_destroy {
+    template<typename U = T>
+    std::enable_if_t<detail::has_before_destroy_v<U>> operator()(T &obj) { obj.before_destroy(); }
+
+    template<typename U = T>
+    std::enable_if_t<detail::is_container_v<U>> operator()(T &container) {
+        for(auto &obj : container)
+            before_destroy<decltype(obj)>()(obj); 
+    }
+
+    template<typename U = T>
+    std::enable_if_t<!detail::has_before_destroy_v<U> && !detail::is_container_v<U>> operator()(T &) {}
+};
 
 
 
@@ -29,7 +74,6 @@ struct anchor_node;
 struct sentinel {};
 
 
-extern std::size_t undelayed_free_count;
 extern node head;
 extern node delayed_free_head;
 extern node reachable_head;
@@ -40,20 +84,14 @@ extern bool is_running;
 void mark_reachable(node *ptr);
 void free_delayed();
 void free_unreachable();
-void delete_list();
+void delete_list(node &head);
 
-
-template<typename T, typename = std::void_t<>>
-constexpr bool is_container_v = false;
-
-template<typename T>
-constexpr bool is_container_v<T, std::void_t<decltype(std::begin(std::declval<T>()), std::end(std::declval<T>()))>> = true;
 
 
 template<typename Node>
 struct list_node {
-    list_node() {}
-    list_node(Node *n, Node *p) : next(n), prev(p) {}
+    list_node() noexcept {}
+    list_node(Node *n, Node *p) noexcept : next(n), prev(p) {}
 
     list_node(const list_node &) = delete;
     list_node(list_node &&) = delete;
@@ -61,10 +99,10 @@ struct list_node {
     list_node &operator=(list_node &&) = delete;
 
     void list_insert(Node &head) {
-        head.next->prev = this;
+        head.next->prev = static_cast<Node*>(this);
         next = head.next;
         prev = &head;
-        head.next = this;
+        head.next = static_cast<Node*>(this);
     }
 
     void list_remove() {
@@ -78,11 +116,12 @@ struct list_node {
 
 
 struct node : list_node<node> {
-    node() { list_insert(head); }
-    node(sentinel) : list_node(this, this) {}
+    node() noexcept { list_insert(head); }
+    node(sentinel) noexcept : list_node(this, this) {}
     virtual ~node() {}
 
-    virtual void transverse_children(action &act) = 0;
+    virtual void transverse(action &) {}
+    virtual void before_destroy() {}
 
     bool mark_reachable();
     void free();
@@ -93,26 +132,27 @@ struct node : list_node<node> {
 
 
 
-template<typename T, typename Transverse>
-struct object : node {
+template<typename T>
+struct object : transverse<T>, before_destroy<T>, node {
     template<typename... Args>
     object(Args&&... args) : node(), value(std::forward<Args>(args)...) {}
 
-    void transverse_children(action &act) override { Transverse()(value, act); }
+    void transverse(action &act) override { gc::transverse<T>::operator()(value, act); }
+    void before_destroy() override { gc::before_destroy<T>::operator()(value); }
 
     T value;
 };
 
 
 struct anchor_node : list_node<anchor_node> {
-    anchor_node() { list_insert(anchor_head); }
-    anchor_node(sentinel) : list_node(this, this) {}
+    anchor_node() noexcept { list_insert(anchor_head); }
+    anchor_node(sentinel) noexcept : list_node(this, this) {}
 
     ~anchor_node() { list_remove(); }
 
-protected:
-    virtual node *get_node() = 0;
+    virtual node *detail_get_node() noexcept { return nullptr; }
 };
+
 
 
 }  // namespace detail

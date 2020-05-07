@@ -7,7 +7,6 @@ namespace gc {
 namespace detail {
 
 
-std::size_t undelayed_free_count = 0;
 node head{sentinel()};
 node delayed_free_head{sentinel()};
 node reachable_head{sentinel()};
@@ -24,16 +23,19 @@ struct free_action : action {
     free_action(std::size_t d) : depth(d) {}
 
     bool detail_perform(detail::node *node) override {
-        if(node->ref_count > 1)
+        if(node->ref_count > 1) {
+            --node->ref_count;
             return false;
+        }
 
         node->list_remove();
+        node->before_destroy();
 
         if(depth > 50) {
             node->list_insert(delayed_free_head);
         } else {
             free_action child_action(depth + 1);
-            node->transverse_children(child_action);
+            node->transverse(child_action);
             delete node;
         }
 
@@ -44,16 +46,14 @@ struct free_action : action {
 };
 
 
-void mark_reachable(node *ptr) {
+void transverse_and_mark_reachable(node *ptr) {
     mark_reachable_action act;
 
-    if(!act.detail_perform(*ptr))
-        return; //ptr->mark_reachable();
+    if(!act.detail_perform(ptr))
+        return;
     
     node *old_head = reachable_head.next;
-
-    ptr->transverse_children(act);
-    //ptr->mark_children_reachable();
+    ptr->transverse(act);
 
     node *new_head = reachable_head.next;
 
@@ -61,8 +61,7 @@ void mark_reachable(node *ptr) {
         node *node = new_head;
 
         while(node != old_head) {
-            node->transverse_children(act);
-            //node->mark_children_reachable();
+            node->transverse(act);
             node = node->next;
         }
 
@@ -72,19 +71,28 @@ void mark_reachable(node *ptr) {
 }
 
 
-void free_delayed() {   // TODO: revisit
+void free_delayed() {
+    free_action act(0);
+
     while(delayed_free_head.next != &delayed_free_head) {
-        undelayed_free_count = 0;
-        delete_list(delayed_free_head, false);
+        node *next = delayed_free_head.next;
+        delayed_free_head.next = &delayed_free_head;
+        delayed_free_head.prev = &delayed_free_head;
+
+        while(next != &delayed_free_head) {
+            node *current = next;
+            next = next->next;
+            current->transverse(act);
+            delete current;
+        }
     }
-    undelayed_free_count = 0;
 }
 
 
 void free_unreachable() {
-    // TODO: set running and update ref_counts
-    free_delayed();
-    delete_list(head, true);
+    is_running = true;
+    delete_list(head);
+    is_running = false;
 
     head.next = reachable_head.next;
     head.prev = reachable_head.prev;
@@ -98,22 +106,25 @@ void free_unreachable() {
         n->reachable = false;
         n = n->next;
     }
-    // TODO: running = false
 }
 
 
-void delete_list(node &head, bool check_delayed) {   // TODO: not exception safe :-/
+void delete_list(node &head) {
     node *next = head.next;
-    head.next = &head;
-    head.prev = &head;
+
+    while(next != &head) {
+        next->before_destroy();
+        next = next->next;
+    }
+
+    next = head.next;
+    //head.next = &head;
+    //head.prev = &head;
 
     while(next != &head) {
         node *current = next;
         next = next->next;
         delete current;
-
-        if(check_delayed)
-            free_delayed();
     }
 }
 
@@ -133,9 +144,10 @@ bool node::mark_reachable() {
 
 
 void node::free() {
-    gc_running = true;
-    free_action action(0);
-    gc_running = false;
+    is_running = true;
+    free_action(0).detail_perform(this);
+    free_delayed();
+    is_running = false;
 }
 
 
@@ -144,15 +156,15 @@ void node::free() {
 
 
 void collect() {
-    mark_reachable_action act;
-    anchor_node *node = anchor_head.next;
+    detail::mark_reachable_action act;
+    detail::anchor_node *node = detail::anchor_head.next;
 
-    while(node != &anchor_head) {
-        mark_reachable(node->get_node());
+    while(node != &detail::anchor_head) {
+        detail::transverse_and_mark_reachable(node->detail_get_node());
         node = node->next;
     }
 
-    free_unreachable();
+    detail::free_unreachable();
 }
 
 
