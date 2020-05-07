@@ -49,7 +49,7 @@ struct free_action : action {
 void transverse_and_mark_reachable(node *ptr) {
     mark_reachable_action act;
 
-    if(!act.detail_perform(ptr))
+    if(!ptr || !act.detail_perform(ptr))
         return;
     
     node *old_head = reachable_head.next;
@@ -94,12 +94,17 @@ void free_unreachable() {
     delete_list(head);
     is_running = false;
 
-    head.next = reachable_head.next;
-    head.prev = reachable_head.prev;
-    head.next->prev = &head;
-    head.prev->next = &head;
-    reachable_head.next = &reachable_head;
-    reachable_head.prev = &reachable_head;
+    if(reachable_head.next != &reachable_head) {
+        head.next = reachable_head.next;
+        head.prev = reachable_head.prev;
+        head.next->prev = &head;
+        head.prev->next = &head;
+        reachable_head.next = &reachable_head;
+        reachable_head.prev = &reachable_head;
+    } else {
+        head.next = &head;
+        head.prev = &head;
+    }
 
     node *n = head.next;
     while(n != &head) {

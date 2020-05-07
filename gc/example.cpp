@@ -52,7 +52,7 @@ void graph_node::before_destroy() {
 int main() {
     gc::anchor_ptr<graph_node> one_anchor = gc::make_anchor_ptr<graph_node>("OneAnchor");
     gc::anchor_ptr<graph_node> null_anchor;
-    gc::ptr<graph_node> unanchored = gc::make_ptr<graph_node>("Unanchored");
+/*    gc::ptr<graph_node> unanchored = gc::make_ptr<graph_node>("Unanchored");
 
     gc::make_ptr<graph_node>("TempPtr");
     gc::make_anchor_ptr<graph_node>("TempAnchor");
@@ -76,6 +76,6 @@ int main() {
     std::cout << one_anchor->name << std::endl;
     std::cout << (*unanchored).name << std::endl;
     std::cout << anchors[0].get()->name << std::endl;
-    gc::collect();
+*/    gc::collect();
 }
 

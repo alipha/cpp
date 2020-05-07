@@ -16,6 +16,16 @@
 // TODO: support T[]
 // TODO: gc::anchor
 // TODO: weak_ptr
+// TODO: on gc::ptr constructor, call transverse and check
+//       that all gc::ptrs that have been created are
+//       reached via transverse.
+// TODO: on gc::collect, go through the unreachables and
+//       decrement reference counts. for any still having
+//       refcounts, they weren't reached via transverse
+// TODO: check during free that the freed objects are
+//       reachable via transverse... or that deleting an
+//       object containing gc::ptrs that those gc::ptrs
+//       were reached via transverse?
 
 
 namespace gc {
@@ -166,7 +176,10 @@ anchor_ptr<T> make_anchor_ptr(Args&&... args) {
 
 struct action {
     template<typename T>
-    void operator()(ptr<T> &p) { detail_perform(p.p); }
+    void operator()(ptr<T> &p) {
+       if(p.p) 
+            detail_perform(p.p); 
+    }
 
     template<typename T>
     std::enable_if_t<detail::is_container_v<T>> operator()(T &container) {
