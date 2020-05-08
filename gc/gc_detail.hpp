@@ -3,7 +3,7 @@
 
 #include <cstddef>
 #include <iterator>
-//#include <tuple>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -69,37 +69,47 @@ template<typename T>
 constexpr bool has_before_destroy_v<T, std::void_t<decltype(std::declval<T>().before_destroy())>> = true;
 
 
+
+template<typename T>
+struct do_action;
+
+template<template<typename> typename Func>
+struct apply_to_all;
+
+
+struct node;
+
+
 }  // namespace detail
+
 
 
 template<typename T>
 struct transverse {
-    //static_assert(can_transverse_v<T>, "T must implement member function void transverse(gc::action&) or");
-
     template<typename U = T>
     std::enable_if_t<detail::has_transverse_v<U>> operator()(T &obj, action &act) { 
         obj.transverse(act); 
     }
-    
-    template<typename U = T>
-    std::enable_if_t<detail::is_container_v<U> && !detail::has_transverse_v<U>> operator()(T &container, action &act) {
-        for(auto &obj : container)
-            transverse<decltype(obj)>()(obj, act); 
-    }
 };
 
+
+template<typename T>
+struct before_destroy {
+    template<typename U = T>
+    std::enable_if_t<detail::has_before_destroy_v<U>> operator()(T &obj) { obj.before_destroy(); }
+
+    template<typename U = T>
+    std::enable_if_t<!detail::has_before_destroy_v<U>> operator()(T &) {}
+};
+
+/*
 template<typename T>
 struct transverse<T&> : transverse<T> {};
 
 template<typename T>
 struct transverse<T&&> : transverse<T> {};
+*/
 
-
-template<typename T, typename = std::void_t<>>
-constexpr bool can_transverse_v = false;
-
-template<typename T>
-constexpr bool can_transverse_v<T, std::void_t<decltype(transverse<T>()(std::declval<T&>(), std::declval<action&>()))>> = true;
 
 
 template<typename T>
@@ -114,52 +124,15 @@ struct transverse<anchor_ptr<T>> {
 };
 
 
-template<typename... T>
-struct transverse<std::variant<T...>> {
-    static_assert((false || ... || can_transverse_v<T>), "Expected at least one T in std::variant to be transversable");
 
-    void operator()(std::variant<T...> &v, action &act) {
-        std::visit([&act](auto &obj) {
-            if constexpr(can_transverse_v<decltype(obj)>) {
-                debug_out("can transverse");
-                transverse<decltype(obj)>()(obj, act);
-            } else {
-                debug_out("CAN'T transverse");
-            }
-        }, v);
-    }
-};
-
-
-
-template<typename T>
-struct before_destroy {
-    template<typename U = T>
-    std::enable_if_t<detail::has_before_destroy_v<U>> operator()(T &obj) { obj.before_destroy(); }
-
-    template<typename U = T>
-    std::enable_if_t<detail::is_container_v<U>> operator()(T &container) {
-        for(auto &obj : container)
-            before_destroy<decltype(obj)>()(obj); 
+struct action {
+    template<typename T>
+    void operator()(T &obj) {
+        detail::apply_to_all<detail::do_action>()(obj, *this);
     }
 
-    template<typename U = T>
-    std::enable_if_t<!detail::has_before_destroy_v<U> && !detail::is_container_v<U>> operator()(T &) {}
+    virtual bool detail_perform(detail::node *node) = 0;
 };
-
-template<typename T>
-struct before_destroy<T&> : before_destroy<T> {};
-
-template<typename T>
-struct before_destroy<T&&> : before_destroy<T> {};
-
-template<typename... T>
-struct before_destroy<std::variant<T...>> {
-    void operator()(std::variant<T...> &v) {
-        std::visit([](auto &obj) { before_destroy<decltype(obj)>()(obj); }, v);
-    }
-};
-
 
 
 
@@ -184,6 +157,74 @@ void mark_reachable(node *ptr);
 void free_delayed();
 void free_unreachable();
 void delete_list(node &head);
+
+
+template<typename T>
+struct do_action {
+    template<typename U>
+    void operator()(ptr<U> &p, action &act) {
+        if(p.p)
+            act.detail_perform(p.p);
+    }
+};
+
+
+template<typename T, template<typename> typename Func, typename... Args>
+constexpr bool can_apply(long) { return false; }
+
+template<typename T, template<typename> typename Func, typename... Args>
+constexpr bool can_apply(int, std::void_t<decltype(Func<T>()(std::declval<T&>(), std::declval<Args&>()...))>* = 0) { return true; }
+
+
+template<typename T, template<typename> typename Func, typename... Args>
+constexpr bool can_apply_to_all(long) { return false; }
+
+template<typename T, template<typename> typename Func, typename... Args>
+constexpr bool can_apply_to_all(int, std::void_t<decltype(apply_to_all<Func>()(std::declval<T&>(), std::declval<Args&>()...))>* = 0) { return true; }
+
+
+
+template<template<typename> typename Func>
+struct apply_to_all {
+    template<typename T, typename... Args>
+    std::enable_if_t<!detail::is_container_v<T> && can_apply<T, Func, Args...>(0)> 
+    operator()(T &obj, Args&&... args) {
+        Func<T>()(obj, std::forward<Args>(args)...);
+    }
+
+    template<typename T, typename... Args>
+    std::enable_if_t<detail::is_container_v<T>> operator()(T &container, Args&&... args) {
+        for(auto &obj : container)
+            apply_to_all<Func>()(obj, std::forward<Args>(args)...);
+    }
+
+    template<typename... Ts, typename... Args>
+    void operator()(std::variant<Ts...> &v, Args&... args) {
+        static_assert((false || ... || can_apply_to_all<Ts, Func, Args...>(0)), 
+                "expected at least one T in std::variant to be transversable");
+
+        std::visit([&](auto &obj) {
+            if constexpr(can_apply_to_all<decltype(obj), Func, Args...>(0)) {
+                debug_out("can apply");
+                apply_to_all<Func>()(obj, args...);
+            } else {
+                debug_out("CAN'T apply");
+            }
+        }, v);
+    }
+
+    template<typename T, typename U, typename... Args>
+    void operator()(std::pair<T, U> &p, Args&&... args) {
+        constexpr bool can_apply_T = can_apply_to_all<T, Func, Args...>(0);
+        constexpr bool can_apply_U = can_apply_to_all<U, Func, Args...>(0);
+        static_assert(can_apply_T || can_apply_U, "expected one of the types in the std::pair to be transversable");
+
+        if constexpr(can_apply_T)
+            apply_to_all<Func>()(p.left, args...);
+        if constexpr(can_apply_U)
+            apply_to_all<Func>()(p.right, args...);
+    }
+};
 
 
 
@@ -238,12 +279,12 @@ struct node : list_node<node> {
 
 
 template<typename T>
-struct object : transverse<T>, before_destroy<T>, node {
+struct object : /*transverse<T>, before_destroy<T>,*/ node {
     template<typename... Args>
     object(Args&&... args) : node(), value(std::forward<Args>(args)...) {}
 
-    void transverse(action &act) override { gc::transverse<T>::operator()(value, act); }
-    void before_destroy() override { gc::before_destroy<T>::operator()(value); }
+    void transverse(action &act) override { apply_to_all<gc::transverse>()(value, act); }
+    void before_destroy() override { apply_to_all<gc::before_destroy>()(value); }
 
     T value;
 };

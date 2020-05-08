@@ -89,7 +89,8 @@ public:
     }
 
 protected:
-    friend struct action;
+    template<typename U>
+    friend struct detail::do_action;
 
     template<typename... Args>
     static detail::object<T> *create_object(Args&&... args) {
@@ -179,24 +180,6 @@ template<typename T, typename... Args>
 anchor_ptr<T> make_anchor_ptr(Args&&... args) {
     return anchor_ptr<T>(std::in_place_t(), std::forward<Args>(args)...); 
 }
-
-
-
-struct action {
-    template<typename T>
-    void operator()(ptr<T> &p) {
-       if(p.p) 
-            detail_perform(p.p); 
-    }
-
-    template<typename T>
-    std::enable_if_t<detail::is_container_v<T>> operator()(T &container) {
-        for(auto &obj : container)
-            operator()(obj);
-    }
-
-    virtual bool detail_perform(detail::node *node) = 0;
-};
 
 
 }  // namespace gc

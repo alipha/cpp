@@ -99,6 +99,7 @@ void run() {
     }
 
     gc::anchor_ptr<variant_obj> ptr_variant = gc::make_anchor_ptr<variant_obj>(graph_node("PtrVariant"));
+    gc::anchor_ptr<variant_obj> ptr_variant2 = gc::make_anchor_ptr<variant_obj>(3);
 
     gc::anchor_ptr<graph_node> null_anchor2 = null_anchor;
     gc::ptr<graph_node> null_ptr = null_anchor;     // don't do this
