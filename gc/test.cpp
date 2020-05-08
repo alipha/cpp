@@ -31,6 +31,7 @@ struct graph_node {
 };
 
 
+using variant_obj = std::variant<int, graph_node, std::vector<graph_node>>;
 using variant_ptr = std::variant<int, gc::ptr<graph_node>, std::vector<gc::ptr<graph_node>>>;
 using variant_anchor = std::variant<int, gc::anchor_ptr<graph_node>, std::vector<gc::anchor_ptr<graph_node>>>;
 
@@ -97,12 +98,17 @@ void run() {
         variant_ptr var_ptrs = std::vector<gc::ptr<graph_node>>(2, gc::make_ptr<graph_node>("VariantPtrs"));
     }
 
+    gc::anchor_ptr<variant_obj> ptr_variant = gc::make_anchor_ptr<variant_obj>(graph_node("PtrVariant"));
+
     gc::anchor_ptr<graph_node> null_anchor2 = null_anchor;
     gc::ptr<graph_node> null_ptr = null_anchor;     // don't do this
 
     std::cout << one_anchor->name << std::endl;
     std::cout << anchors[0].get()->name << std::endl;
-/**/   
+   
+
+    gc::anchor_ptr<gc::ptr<graph_node>> foo = gc::make_anchor_ptr<gc::ptr<graph_node>>(gc::make_ptr<graph_node>("test"));
+
     std::cout << "Before collect" << std::endl;
     gc::collect();
 }
