@@ -279,7 +279,7 @@ struct node : list_node<node> {
 
 
 template<typename T>
-struct object : /*transverse<T>, before_destroy<T>,*/ node {
+struct object : node {
     template<typename... Args>
     object(Args&&... args) : node(), value(std::forward<Args>(args)...) {}
 

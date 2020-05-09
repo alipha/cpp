@@ -55,7 +55,32 @@ void graph_node::before_destroy() {
 }
 
 
-void run() {
+
+void create_links(std::vector<gc::anchor_ptr<graph_node>> &anchors, std::vector<std::pair<std::string, std::string>> &links) {
+    std::map<std::string, gc::anchor_ptr<graph_node>> node_by_name;
+
+    for(auto &anchor : anchors)
+        node_by_name[anchor->name] = anchor;
+
+    for(auto &link : links) {
+        auto from_it = node_by_name.find(link.first);
+        if(from_it == node_by_name.end())
+            from_it = node_by_name.try_emplace(link.first, gc::make_anchor_ptr<graph_node>(link.first)).first;
+        
+        auto to_it = node_by_name.find(link.second);
+        if(to_it == node_by_name.end())
+            to_it = node_by_name.try_emplace(link.second, gc::make_anchor_ptr<graph_node>(link.second)).first;
+
+        if(!from_it.second->primary_route)
+            from_it.second->primary_route = to_it.second;
+        else
+            from_it.second->other_routes.push_back(to_it.second);
+    }
+}
+
+
+
+void composition_tests() {
     gc::anchor_ptr<graph_node> one_anchor = gc::make_anchor_ptr<graph_node>("OneAnchor");
     gc::anchor_ptr<graph_node> null_anchor;
     {
@@ -110,14 +135,17 @@ void run() {
 
     gc::anchor_ptr<gc::ptr<graph_node>> foo = gc::make_anchor_ptr<gc::ptr<graph_node>>(gc::make_ptr<graph_node>("test"));
 
-    std::cout << "Before collect" << std::endl;
+    std::cout << "Before collect in composition_tests" << std::endl;
     gc::collect();
 }
 
 
+
 int main() {
-    run();
-    std::cout << "In main" << std::endl;
+    composition_tests();
+    std::cout << "After composition_tests" << std::endl;
     gc::collect();
+
+    tests();
 }
 

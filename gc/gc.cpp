@@ -127,7 +127,7 @@ void transverse_and_mark_reachable(node *ptr) {
 
 
 void free_delayed() {
-    free_action act(0);
+    free_action act(1);
 
     while(delayed_free_head.next != &delayed_free_head) {
         debug_out("start free_delayed loop");
@@ -247,7 +247,9 @@ void collect() {
     detail::mark_reachable_action act;
     detail::anchor_node *node = detail::anchor_head.next;
 
-    debug_out("collect: marking reachables");
+    debug_out("collect: marking reachable nodes: " + std::to_string(object_count())
+            + ", anchors: " + std::to_string(anchor_count()));
+
     while(node != &detail::anchor_head) {
         detail::transverse_and_mark_reachable(node->detail_get_node());
         node = node->next;
@@ -255,6 +257,47 @@ void collect() {
 
     debug_out("collect: freeing unreachables");
     detail::free_unreachable();
+    
+    debug_out("collect: still reachable nodes: " + std::to_string(object_count())
+            + ", anchors: " + std::to_string(anchor_count()));
+}
+
+
+std::size_t object_count() {
+    if(debug) {
+        if(detail::delayed_free_head.next != &detail::delayed_free_head)
+            debug_error("delayed_free is not empty");
+        if(detail::delayed_free_head.prev != &detail::delayed_free_head)
+            debug_error("delayed_free.prev != head");
+        if(detail::reachable_head.next != &detail::reachable_head)
+            debug_error("reachable is not empty");
+        if(detail::reachable_head.prev != &detail::reachable_head)
+            debug_error("reachable.prev != head");
+    }
+
+    std::size_t count = 0;
+    detail::node *next = detail::active_head.next;
+
+    while(next != &detail::active_head) {
+        detail::debug_not_head(next, nullptr);
+        ++count;
+        next = next->next;
+    }
+
+   return count; 
+}
+
+
+std::size_t anchor_count() {
+    std::size_t count = 0;
+    detail::anchor_node *next = detail::anchor_head.next;
+
+    while(next != &detail::anchor_head) {
+        ++count;
+        next = next->next;
+    }
+
+   return count; 
 }
 
 

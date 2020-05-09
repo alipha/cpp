@@ -182,6 +182,9 @@ anchor_ptr<T> make_anchor_ptr(Args&&... args) {
 }
 
 
+std::size_t object_count();
+std::size_t anchor_count();
+
 }  // namespace gc
 
 
