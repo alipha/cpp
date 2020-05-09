@@ -59,8 +59,6 @@ struct dec_ref_action : action {
 
 
 struct free_action : action {
-    free_action(std::size_t d) : depth(d) {}
-
     // returning true means: did i do something? false means this object is not ready to be freed (ref_count > 0)
     bool detail_perform(detail::node *node) override {
         if(debug && !node)
@@ -71,32 +69,33 @@ struct free_action : action {
             return false;
         }
 
-        if(debug) {
-            if(depth > 0 && node->ref_count != 1)
-                debug_error("free_action: refcount is not 1!");
-            if(depth == 0 && node->ref_count != 0)
-                debug_error("free_action: refcount is not 0!");
-            
-            node->ref_count = 0;
-        }
-
+		if(debug)
+			node->ref_count = 0;
         node->list_remove();
-        node->before_destroy();
-
-        if(depth > 50) {
-            debug_out("depth: " << depth);
-            node->list_insert(delayed_free_head);
-        } else {
-            free_action child_action(depth + 1);
-            node->transverse(child_action);
-            delete node;
-        }
-
+        //node->before_destroy();
+        node->list_insert(delayed_free_head);
         return true;
     }
-
-    std::size_t depth;
 };
+
+
+void transverse_list(node &head, node *old_head, action &act) {
+    node *new_head = head.next;
+
+    while(old_head != new_head) {
+        //debug_out("start transverse_list loop");
+        node *node = new_head;
+
+        while(node != old_head) {
+            debug_not_head(node, nullptr);
+            node->transverse(act);
+            node = node->next;
+        }
+
+        old_head = new_head;
+        new_head = head.next;
+    }
+}
 
 
 void transverse_and_mark_reachable(node *ptr) {
@@ -108,44 +107,19 @@ void transverse_and_mark_reachable(node *ptr) {
     node *old_head = reachable_head.next;
     ptr->transverse(act);
 
-    node *new_head = reachable_head.next;
-
-    while(old_head != new_head) {
-        debug_out("start transverse_and_mark loop");
-        node *node = new_head;
-
-        while(node != old_head) {
-            debug_not_head(node, nullptr);
-            node->transverse(act);
-            node = node->next;
-        }
-
-        old_head = new_head;
-        new_head = reachable_head.next;
-    }
+	transverse_list(reachable_head, old_head, act);
 }
 
 
 void free_delayed() {
-    free_action act(1);
+    free_action act;
 
-    while(delayed_free_head.next != &delayed_free_head) {
-        debug_out("start free_delayed loop");
-        node *next = delayed_free_head.next;
-        delayed_free_head.next = &delayed_free_head;
-        delayed_free_head.prev = &delayed_free_head;
+	node *old_head = &delayed_free_head;
+    transverse_list(delayed_free_head, old_head, act);
 
-        while(next != &delayed_free_head) {
-            debug_not_head(next, nullptr);
-            node *current = next;
-            next = next->next;
-
-            if(debug && current->ref_count != 0)
-                debug_error("free_delayed: refcount is not 0!");
-            current->transverse(act);
-            delete current;
-        }
-    }
+	delete_list(delayed_free_head);
+    delayed_free_head.next = &delayed_free_head;
+    delayed_free_head.prev = &delayed_free_head;
 }
 
 
@@ -191,20 +165,18 @@ void delete_list(node &head) {
     while(next != &head) {
         debug_not_head(next, nullptr);
         next->before_destroy();
-        if(debug)
+        if(debug && &head == &active_head)
             next->transverse(dec_action);
         next = next->next;
     }
 
     next = head.next;
-    //head.next = &head;
-    //head.prev = &head;
 
     debug_out("deleting list");
     while(next != &head) {
         debug_not_head(next, nullptr);
         if(debug && next->ref_count != 0)
-            debug_error("unreachable ref_count = " + std::to_string(next->ref_count));
+            debug_error("delete_list ref_count = " + std::to_string(next->ref_count));
 
         node *current = next;
         next = next->next;
@@ -232,7 +204,7 @@ void node::free() {
 
     if(debug && ref_count != 0)
         throw std::logic_error("free: refcount is not 0!");
-    free_action(0).detail_perform(this);
+    free_action().detail_perform(this);
     free_delayed();
 
     is_running = false;

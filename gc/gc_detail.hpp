@@ -153,7 +153,8 @@ extern bool is_running;
 
 
 void debug_not_head(node *n, node *allowed_head);
-void mark_reachable(node *ptr);
+void transverse_list(node &head, node *old_head, action &act);
+void transverse_and_mark_reachable(node *ptr);
 void free_delayed();
 void free_unreachable();
 void delete_list(node &head);
@@ -167,6 +168,20 @@ struct do_action {
             act.detail_perform(p.p);
     }
 };
+
+
+template<typename T, typename V, size_t... I>
+void tuple_visit_impl(V&& v, T&& t, std::index_sequence<I...>)
+{
+    (..., v(std::get<I>(t)));
+}
+
+template<typename V, typename T>
+void tuple_visit(V&& v, T&& t)
+{
+    tuple_visit_impl(std::forward<V>(v), std::forward<T>(t),
+        std::make_index_sequence<std::tuple_size_v<std::decay_t<T>>>());
+}
 
 
 template<typename T, template<typename> typename Func, typename... Args>
@@ -211,6 +226,21 @@ struct apply_to_all {
                 debug_out("CAN'T apply");
             }
         }, v);
+    }
+
+    template<typename... Ts, typename... Args>
+    void operator()(std::tuple<Ts...> &t, Args&... args) {
+        static_assert((false || ... || can_apply_to_all<Ts, Func, Args...>(0)), 
+                "expected at least one T in std::tuple to be transversable");
+
+        tuple_visit([&](auto &obj) {
+            if constexpr(can_apply_to_all<decltype(obj), Func, Args...>(0)) {
+                debug_out("tuple: can apply");
+                apply_to_all<Func>()(obj, args...);
+            } else {
+                debug_out("tuple: CAN'T apply");
+            }
+        }, t);
     }
 
     template<typename T, typename U, typename... Args>

@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <set>
+#include <map>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -34,6 +35,9 @@ struct graph_node {
 using variant_obj = std::variant<int, graph_node, std::vector<graph_node>>;
 using variant_ptr = std::variant<int, gc::ptr<graph_node>, std::vector<gc::ptr<graph_node>>>;
 using variant_anchor = std::variant<int, gc::anchor_ptr<graph_node>, std::vector<gc::anchor_ptr<graph_node>>>;
+
+using tuple_obj = std::tuple<int, graph_node, std::vector<graph_node>>;
+using tuple_ptr = std::tuple<int, gc::ptr<graph_node>, std::vector<gc::ptr<graph_node>>>;
 
 
 std::ostream &operator<<(std::ostream &os, const graph_node &node) {
@@ -71,10 +75,10 @@ void create_links(std::vector<gc::anchor_ptr<graph_node>> &anchors, std::vector<
         if(to_it == node_by_name.end())
             to_it = node_by_name.try_emplace(link.second, gc::make_anchor_ptr<graph_node>(link.second)).first;
 
-        if(!from_it.second->primary_route)
-            from_it.second->primary_route = to_it.second;
+        if(!from_it->second->primary_route)
+            from_it->second->primary_route = to_it->second;
         else
-            from_it.second->other_routes.push_back(to_it.second);
+            from_it->second->other_routes.push_back(to_it->second);
     }
 }
 
@@ -124,8 +128,13 @@ void composition_tests() {
     }
 
     gc::anchor_ptr<variant_obj> ptr_variant = gc::make_anchor_ptr<variant_obj>(graph_node("PtrVariant"));
-    gc::anchor_ptr<variant_obj> ptr_variant2 = gc::make_anchor_ptr<variant_obj>(3);
+    gc::anchor_ptr<variant_obj> ptr_variant2 = gc::make_ptr<variant_obj>(3);
 
+    gc::anchor_ptr<tuple_ptr> anchor_tup = gc::make_ptr<tuple_ptr>(4, 
+            gc::make_ptr<graph_node>("AnchorTuple"), 
+            std::vector<gc::ptr<graph_node>>(1, gc::make_ptr<graph_node>("AnchorTupleVec0")));
+    gc::anchor_ptr<tuple_obj> ptr_tuple = gc::make_anchor_ptr<tuple_obj>(5, graph_node("PtrTuple"), std::vector<graph_node>(1, graph_node("PtrTupleVector0")));
+    
     gc::anchor_ptr<graph_node> null_anchor2 = null_anchor;
     gc::ptr<graph_node> null_ptr = null_anchor;     // don't do this
 
@@ -146,6 +155,6 @@ int main() {
     std::cout << "After composition_tests" << std::endl;
     gc::collect();
 
-    tests();
+    //tests();
 }
 

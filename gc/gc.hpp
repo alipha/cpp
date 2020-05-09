@@ -19,7 +19,6 @@
 // TODO: on gc::ptr constructor, call transverse and check
 //       that all gc::ptrs that have been created are
 //       reached via transverse.
-// TODO: support std::tuple
 
 
 namespace gc {
