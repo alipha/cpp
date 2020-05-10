@@ -292,6 +292,7 @@ struct node : list_node<node> {
 
     virtual void transverse(action &) {}
     virtual void before_destroy() {}
+    virtual void *get_value() { return nullptr; }
 
     void list_remove() {
         if(debug)
@@ -315,6 +316,7 @@ struct object : node {
 
     void transverse(action &act) override { apply_to_all<gc::transverse>()(value, act); }
     void before_destroy() override { apply_to_all<gc::before_destroy>()(value); }
+    void *get_value() override { return &value; }
 
     T value;
 };
@@ -334,7 +336,6 @@ struct anchor_node : list_node<anchor_node> {
 #endif
     }
 };
-
 
 
 }  // namespace detail

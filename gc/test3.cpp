@@ -66,4 +66,29 @@ int main() {
 
         p = p->inner;
     }
+
+    
+    gc::for_types<rectangle>::iterate_all_objects([](auto &&r) { std::cout << "area: " << r.w * r.h << std::endl; });
+   
+    auto rect_or_void = [](auto &&r) {
+        if constexpr(std::is_same_v<void *, std::remove_reference_t<decltype(r)>>) {
+            std::cout << "void*: " << static_cast<circle*>(r)->r << std::endl;
+        } else {
+            std::cout << "perimeter: " << 2 * (r.w + r.h) << std::endl;
+        }
+    };
+
+    gc::for_types<rectangle, void*>::iterate_all_objects(rect_or_void);
+    gc::for_types<void*, rectangle>::iterate_all_objects(rect_or_void);
+
+    gc::for_types<rectangle, circle>::iterate_all_objects([](auto &&s) {
+        using shape_type = std::remove_reference_t<decltype(s)>;
+        if constexpr(std::is_same_v<shape_type, rectangle>) {
+            std::cout << "is rectangle" << std::endl;
+        } else if constexpr(std::is_same_v<shape_type, circle>) {
+            std::cout << "is circle" << std::endl;
+        } else {
+            static_assert(sizeof(s) && false, "not a rectangle or circle");
+        }
+    });
 }

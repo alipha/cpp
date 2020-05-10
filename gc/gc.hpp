@@ -7,7 +7,7 @@
 #include <new>
 #include <utility>
 #include <type_traits>
-
+#include <typeinfo>
 
 // TODO: const correctness?
 // TODO: use allocators?
@@ -23,6 +23,8 @@
 
 namespace gc {
  
+
+extern bool run_on_bad_alloc;
 
 void collect();
 
@@ -333,7 +335,59 @@ anchor_ptr<T> reinterpret_pointer_cast(anchor_ptr<U> p) noexcept { return anchor
 std::size_t object_count();
 std::size_t anchor_count();
 
-extern bool run_on_bad_alloc;
+
+
+template<typename... Types>
+struct for_types {};
+
+template<>
+struct for_types<> {
+    template<typename Func>
+    static void iterate_all_objects(Func &&func) {
+        static_assert(sizeof(Func) && false, "iterate_all_objects must be called with at least one type");
+    }
+
+    template<typename Func>
+    static bool run_on_node(detail::node *, Func &&) { return false; }
+};
+
+
+template<typename Type, typename... Types>
+struct for_types<Type, Types...> {
+
+    template<typename Func>
+    static void iterate_all_objects(Func &&func) {
+        detail::node *n = detail::active_head.next;
+
+        while(n != &detail::active_head) {
+            run_on_node(n, std::forward<Func>(func));    
+            n = n->next;
+        }
+    }
+
+private:
+    template<typename... Args>
+    friend struct for_types;
+
+    template<typename Func>
+    static bool run_on_node(detail::node *n, Func &&func) {
+        if(typeid(detail::object<Type>&) == typeid(*n)) {
+            func(static_cast<detail::object<Type>*>(n)->value);
+            return true;
+        } else {
+            bool matched = for_types<Types...>::run_on_node(n, std::forward<Func>(func));
+            if constexpr(std::is_same_v<Type, void*>) {
+                if(!matched) {
+                    func(n->get_value());
+                    return true;
+                }
+            }
+            return matched;
+        }
+    }
+};
+
+
 
 }  // namespace gc
 
