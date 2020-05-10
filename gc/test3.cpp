@@ -43,6 +43,42 @@ struct rectangle : shape {
 };
 
 
+
+auto rect_only = [](auto &&r) { std::cout << "area: " << r.w * r.h << std::endl; };
+
+auto rect_or_void = [](auto &&r) {
+    if constexpr(std::is_same_v<void *, std::remove_reference_t<decltype(r)>>) {
+        std::cout << "void*: " << static_cast<circle*>(r)->r << std::endl;
+    } else {
+        std::cout << "perimeter: " << 2 * (r.w + r.h) << std::endl;
+    }
+};
+
+auto rect_or_circle = [](auto &&s) {
+    using shape_type = std::remove_reference_t<decltype(s)>;
+    if constexpr(std::is_same_v<shape_type, rectangle>) {
+        std::cout << "is rectangle" << std::endl;
+    } else if constexpr(std::is_same_v<shape_type, circle>) {
+        std::cout << "is circle" << std::endl;
+    } else {
+        static_assert(sizeof(s) && false, "not a rectangle or circle");
+    }
+};
+
+
+
+void test_iterate_from(gc::ptr<shape> p) {
+    std::cout << std::endl << "start group" << std::endl;
+    gc::for_types<rectangle>::iterate_from(p, rect_only);
+   
+    gc::for_types<rectangle, void*>::iterate_from(p, rect_or_void);
+    gc::for_types<void*, rectangle>::iterate_from(p, rect_or_void);
+
+    gc::for_types<rectangle, circle>::iterate_from(p, rect_or_circle);
+}
+
+
+
 int main() {
     gc::anchor_ptr<rectangle> r = gc::make_anchor_ptr<rectangle>(3, 5);
     r->inner = gc::make_ptr<circle>(4);
@@ -68,27 +104,19 @@ int main() {
     }
 
     
-    gc::for_types<rectangle>::iterate_all_objects([](auto &&r) { std::cout << "area: " << r.w * r.h << std::endl; });
+    gc::for_types<rectangle>::iterate_all_objects(rect_only);
    
-    auto rect_or_void = [](auto &&r) {
-        if constexpr(std::is_same_v<void *, std::remove_reference_t<decltype(r)>>) {
-            std::cout << "void*: " << static_cast<circle*>(r)->r << std::endl;
-        } else {
-            std::cout << "perimeter: " << 2 * (r.w + r.h) << std::endl;
-        }
-    };
-
     gc::for_types<rectangle, void*>::iterate_all_objects(rect_or_void);
     gc::for_types<void*, rectangle>::iterate_all_objects(rect_or_void);
 
-    gc::for_types<rectangle, circle>::iterate_all_objects([](auto &&s) {
-        using shape_type = std::remove_reference_t<decltype(s)>;
-        if constexpr(std::is_same_v<shape_type, rectangle>) {
-            std::cout << "is rectangle" << std::endl;
-        } else if constexpr(std::is_same_v<shape_type, circle>) {
-            std::cout << "is circle" << std::endl;
-        } else {
-            static_assert(sizeof(s) && false, "not a rectangle or circle");
-        }
-    });
+    gc::for_types<rectangle, circle>::iterate_all_objects(rect_or_circle);
+
+
+    std::cout << "iterate_from tests" << std::endl;
+    gc::for_types<rectangle>::iterate_from(r, rect_only);
+
+    test_iterate_from(r);
+    test_iterate_from(r->inner);
+    test_iterate_from(r->inner->inner);
+    test_iterate_from(r->inner->inner->inner);
 }

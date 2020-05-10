@@ -15,8 +15,7 @@ namespace detail {
 
 
 node active_head{sentinel()};
-node delayed_free_head{sentinel()};
-node reachable_head{sentinel()};
+node temp_head{sentinel()};
 anchor_node anchor_head{sentinel()};
 bool is_running = false;
 
@@ -31,10 +30,8 @@ void debug_not_head(node *n, node *allowed_head) {
 
     if(n == &active_head)
         throw std::logic_error("node is active_head");
-    if(n == &delayed_free_head)
-        throw std::logic_error("node is delayed_free_head");
-    if(n == &reachable_head)
-        throw std::logic_error("node is reachable_head");
+    if(n == &temp_head)
+        throw std::logic_error("node is temp_head");
 }
 
 
@@ -75,8 +72,7 @@ struct free_action : action {
 		if(debug)
 			node->ref_count = 0;
         node->list_remove();
-        //node->before_destroy();
-        node->list_insert(delayed_free_head);
+        node->list_insert(temp_head);
         return true;
     }
 };
@@ -101,28 +97,32 @@ void transverse_list(node &head, node *old_head, action &act) {
 }
 
 
-void transverse_and_mark_reachable(node *ptr) {
-    mark_reachable_action act;
-
+void transverse_and_mark_reachable(node *ptr, action &act) {
     if(!ptr || !act.detail_perform(ptr))
         return;
     
-    node *old_head = reachable_head.next;
+    node *old_head = temp_head.next;
     ptr->transverse(act);
 
-	transverse_list(reachable_head, old_head, act);
+	transverse_list(temp_head, old_head, act);
+}
+
+
+void transverse_and_mark_reachable(node *ptr) {
+    mark_reachable_action act;
+    transverse_and_mark_reachable(ptr, act);
 }
 
 
 void free_delayed() {
     free_action act;
 
-	node *old_head = &delayed_free_head;
-    transverse_list(delayed_free_head, old_head, act);
+	node *old_head = &temp_head;
+    transverse_list(temp_head, old_head, act);
 
-	delete_list(delayed_free_head);
-    delayed_free_head.next = &delayed_free_head;
-    delayed_free_head.prev = &delayed_free_head;
+	delete_list(temp_head);
+    temp_head.next = &temp_head;
+    temp_head.prev = &temp_head;
 }
 
 
@@ -131,17 +131,17 @@ void free_unreachable() {
     delete_list(active_head);
     is_running = false;
 
-    if(reachable_head.next != &reachable_head) {
+    if(temp_head.next != &temp_head) {
         debug_out("still reachable nodes");
-        active_head.next = reachable_head.next;
-        active_head.prev = reachable_head.prev;
+        active_head.next = temp_head.next;
+        active_head.prev = temp_head.prev;
         active_head.next->prev = &active_head;
         active_head.prev->next = &active_head;
         debug_not_head(active_head.next, nullptr);
         debug_not_head(active_head.prev, nullptr);
 
-        reachable_head.next = &reachable_head;
-        reachable_head.prev = &reachable_head;
+        temp_head.next = &temp_head;
+        temp_head.prev = &temp_head;
     } else {
         debug_out("no reachable nodes");
         active_head.next = &active_head;
@@ -149,8 +149,13 @@ void free_unreachable() {
     }
 
     debug_out("free_unreachable: setting reachable = false");
-    node *n = active_head.next;
-    while(n != &active_head) {
+    reset_reachable_flag(active_head);
+}
+
+
+void reset_reachable_flag(node &head) {
+    node *n = head.next;
+    while(n != &head) {
         debug_not_head(n, nullptr);
         if(debug && !n->reachable)
             debug_error("free_unreachable: n is not reachable");
@@ -188,16 +193,18 @@ void delete_list(node &head) {
 }
 
 
-bool node::mark_reachable() {
+bool node::mark_reachable(bool update_ref_count) {
     if(reachable) {
-        ++ref_count;
+        if(update_ref_count)
+            ++ref_count;
         return false;
     }
 
-    ref_count = 1;
+    if(update_ref_count)
+        ref_count = 1;
     reachable = true;
     list_remove();
-    list_insert(reachable_head);
+    list_insert(temp_head);
     return true;
 }
 
@@ -240,14 +247,10 @@ void collect() {
 
 std::size_t object_count() {
     if(debug) {
-        if(detail::delayed_free_head.next != &detail::delayed_free_head)
-            debug_error("delayed_free is not empty");
-        if(detail::delayed_free_head.prev != &detail::delayed_free_head)
-            debug_error("delayed_free.prev != head");
-        if(detail::reachable_head.next != &detail::reachable_head)
-            debug_error("reachable is not empty");
-        if(detail::reachable_head.prev != &detail::reachable_head)
-            debug_error("reachable.prev != head");
+        if(detail::temp_head.next != &detail::temp_head)
+            debug_error("temp list is not empty");
+        if(detail::temp_head.prev != &detail::temp_head)
+            debug_error("temp_head.prev != head");
     }
 
     std::size_t count = 0;

@@ -146,17 +146,18 @@ struct sentinel {};
 
 
 extern node active_head;
-extern node delayed_free_head;
-extern node reachable_head;
+extern node temp_head;
 extern anchor_node anchor_head;
 extern bool is_running;
 
 
 void debug_not_head(node *n, node *allowed_head);
 void transverse_list(node &head, node *old_head, action &act);
+void transverse_and_mark_reachable(node *ptr, action &act);
 void transverse_and_mark_reachable(node *ptr);
 void free_delayed();
 void free_unreachable();
+void reset_reachable_flag(node &head);
 void delete_list(node &head);
 
 
@@ -300,7 +301,7 @@ struct node : list_node<node> {
         list_node<node>::list_remove();
     }
 
-    bool mark_reachable();
+    bool mark_reachable(bool update_ref_count = true);
     void free();
 
     std::size_t ref_count = 1;

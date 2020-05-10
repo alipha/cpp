@@ -30,6 +30,102 @@ void collect();
 
 
 template<typename T>
+class ptr;
+
+
+template<typename... Types>
+struct for_types {};
+
+template<>
+struct for_types<> {
+    template<typename Func>
+    static void iterate_all_objects(Func &&func) {
+        static_assert(sizeof(Func) && false, "iterate_all_objects must be called with at least one type");
+    }
+
+    template<typename Func>
+    static bool run_on_node(detail::node *, Func &&) { return false; }
+};
+
+
+template<typename Type, typename... Types>
+struct for_types<Type, Types...> {
+private:
+    template<typename Func>
+    struct custom_action : action {
+
+        custom_action(Func &func) : func(func) {}
+
+        // returning true means: did i do something? false means it was already marked
+        bool detail_perform(detail::node *node) override { 
+            if(debug && !node)
+                throw std::logic_error("custom_action: null");
+            node->mark_reachable(false);
+            run_on_node(node, func);
+            return true;
+        }
+
+        Func &func;
+    };
+
+public:
+    template<typename Func>
+    static void iterate_all_objects(Func &&func) {
+        detail::node *n = detail::active_head.next;
+
+        while(n != &detail::active_head) {
+            run_on_node(n, std::forward<Func>(func));    
+            n = n->next;
+        }
+    }
+
+    
+    template<typename T, typename Func>
+    static void iterate_from(ptr<T> &p, Func &&func) {
+        custom_action<Func> act(func);
+        detail::transverse_and_mark_reachable(p.n, act);
+        debug_out("resetting reachable flag");
+        detail::reset_reachable_flag(detail::temp_head);
+        
+        if(detail::temp_head.next != &detail::temp_head) {
+            debug_out("moving temp list to front of head");
+            detail::temp_head.next->prev = &detail::active_head;
+            detail::temp_head.prev->next = detail::active_head.next;
+            detail::active_head.next->prev = detail::temp_head.prev;
+            detail::active_head.next = detail::temp_head.next;
+            detail::debug_not_head(detail::active_head.next, nullptr);
+            detail::debug_not_head(detail::active_head.prev, nullptr);
+
+            detail::temp_head.next = &detail::temp_head;
+            detail::temp_head.prev = &detail::temp_head;
+        }
+    }
+
+private:
+    template<typename... Args>
+    friend struct for_types;
+
+    template<typename Func>
+    static bool run_on_node(detail::node *n, Func &&func) {
+        if(typeid(detail::object<Type>&) == typeid(*n)) {
+            func(static_cast<detail::object<Type>*>(n)->value);
+            return true;
+        } else {
+            bool matched = for_types<Types...>::run_on_node(n, std::forward<Func>(func));
+            if constexpr(std::is_same_v<Type, void*>) {
+                if(!matched) {
+                    func(n->get_value());
+                    return true;
+                }
+            }
+            return matched;
+        }
+    }
+};
+
+
+
+template<typename T>
 class ptr {
 public:
     using element_type = T;
@@ -137,6 +233,9 @@ protected:
 
     template<typename U>    
     friend struct detail::do_action;
+
+    template<typename... Types>
+    friend struct for_types;
 
 
     ptr(detail::node *n, T *p) noexcept : n(n), p(p) { if(n) ++n->ref_count; }
@@ -334,59 +433,6 @@ anchor_ptr<T> reinterpret_pointer_cast(anchor_ptr<U> p) noexcept { return anchor
 
 std::size_t object_count();
 std::size_t anchor_count();
-
-
-
-template<typename... Types>
-struct for_types {};
-
-template<>
-struct for_types<> {
-    template<typename Func>
-    static void iterate_all_objects(Func &&func) {
-        static_assert(sizeof(Func) && false, "iterate_all_objects must be called with at least one type");
-    }
-
-    template<typename Func>
-    static bool run_on_node(detail::node *, Func &&) { return false; }
-};
-
-
-template<typename Type, typename... Types>
-struct for_types<Type, Types...> {
-
-    template<typename Func>
-    static void iterate_all_objects(Func &&func) {
-        detail::node *n = detail::active_head.next;
-
-        while(n != &detail::active_head) {
-            run_on_node(n, std::forward<Func>(func));    
-            n = n->next;
-        }
-    }
-
-private:
-    template<typename... Args>
-    friend struct for_types;
-
-    template<typename Func>
-    static bool run_on_node(detail::node *n, Func &&func) {
-        if(typeid(detail::object<Type>&) == typeid(*n)) {
-            func(static_cast<detail::object<Type>*>(n)->value);
-            return true;
-        } else {
-            bool matched = for_types<Types...>::run_on_node(n, std::forward<Func>(func));
-            if constexpr(std::is_same_v<Type, void*>) {
-                if(!matched) {
-                    func(n->get_value());
-                    return true;
-                }
-            }
-            return matched;
-        }
-    }
-};
-
 
 
 }  // namespace gc
