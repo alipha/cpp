@@ -32,15 +32,28 @@ class ptr {
 public:
     using element_type = T;
 
-    ptr() noexcept : p(nullptr) {}
-    ptr(std::nullptr_t) noexcept : p(nullptr) {}
+    ptr() noexcept : n(nullptr), p(nullptr) {}
+    ptr(std::nullptr_t) noexcept : n(nullptr), p(nullptr)  {}
 
     template<typename... Args>
-    explicit ptr(std::in_place_t, Args&&... args) 
-        : p(create_object(std::forward<Args>(args)...)) {}
+    explicit ptr(std::in_place_t, Args&&... args) : n(nullptr), p(nullptr) {
+        detail::object<T> *obj = create_object(std::forward<Args>(args)...);
+        n = obj;
+        p = &obj->value;
+    }
 
-    ptr(const ptr &other) noexcept : p(other.p) { if(p) ++p->ref_count; }
-    ptr(ptr &&other) noexcept : p(other.p) { other.p = nullptr; }
+    ptr(const ptr &other) noexcept : n(other.n), p(other.p) { if(n) ++n->ref_count; }
+
+    ptr(ptr &&other) noexcept : n(other.n), p(other.p) { 
+        other.n = nullptr;
+        other.p = nullptr;
+    }
+
+    template<typename U>
+    ptr(ptr<U> other) noexcept : n(other.n), p(other.p) {
+        other.n = nullptr;
+        other.p = nullptr;
+    }
 
     ptr &operator=(std::nullptr_t) {
         reset();
@@ -49,15 +62,28 @@ public:
 
     ptr &operator=(const ptr &other) {
         reset();
+        n = other.n;
         p = other.p;
-        if(p)
-            ++p->ref_count;
+        if(n)
+            ++n->ref_count;
         return *this;
     }
 
     ptr &operator=(ptr &&other) {
         reset();
+        n = other.n;
         p = other.p;
+        other.n = nullptr;
+        other.p = nullptr;
+        return *this;
+    }
+
+    template<typename U>
+    ptr &operator=(ptr<U> other) {
+        reset();
+        n = other.n;
+        p = other.p;
+        other.n = nullptr;
         other.p = nullptr;
         return *this;
     }
@@ -66,7 +92,7 @@ public:
 
     explicit operator bool() const noexcept { return p; }
 
-    T *get() const noexcept { return p ? &p->value : nullptr; }
+    T *get() const noexcept { return p; }
 
     T *operator->() const noexcept { return get(); }
     T &operator*() const noexcept(!debug) { 
@@ -74,35 +100,62 @@ public:
         if(!p)
             throw std::logic_error("dereferencing null gc::ptr");
 #endif
-        return p->value; 
+        return *p; 
     }
     
-    std::size_t use_count() const noexcept { return p ? p->ref_count : 0; }
+    std::size_t use_count() const noexcept { return n ? n->ref_count : 0; }
 
-    void swap(ptr &other) noexcept { std::swap(p, other.p); }
+    void swap(ptr &other) noexcept {
+        std::swap(n, other.n);
+        std::swap(p, other.p);
+    }
 
     void reset() {
-        if(p && !detail::is_running && --p->ref_count == 0)
-            p->free();
+        if(n && !detail::is_running && --n->ref_count == 0)
+            n->free();
+        n = nullptr;
         p = nullptr;
     }
 
 protected:
     template<typename U>
+    friend class ptr;
+    
+    template<typename V, typename U>
+    friend ptr<V> static_pointer_cast(ptr<U> p) noexcept;
+
+    template<typename V, typename U>
+    friend ptr<V> dynamic_pointer_cast(ptr<U> p) noexcept;
+
+    template<typename V, typename U>
+    friend ptr<V> const_pointer_cast(ptr<U> p) noexcept;
+
+    template<typename V, typename U>
+    friend ptr<V> reinterpret_pointer_cast(ptr<U> p) noexcept;
+
+    template<typename U>    
     friend struct detail::do_action;
+
+
+    ptr(detail::node *n, T *p) noexcept : n(n), p(p) { if(n) ++n->ref_count; }
 
     template<typename... Args>
     static detail::object<T> *create_object(Args&&... args) {
         try {
             return new detail::object<T>(std::forward<Args>(args)...);
         } catch(std::bad_alloc &) {
-            debug_out("gc::collect on std::bad_alloc");
-            gc::collect();
-            return new detail::object<T>(std::forward<Args>(args)...);
+            if(run_on_bad_alloc) {
+                debug_out("gc::collect on std::bad_alloc");
+                gc::collect();
+                return new detail::object<T>(std::forward<Args>(args)...);
+            } else {
+                throw;
+            }
         }
     }
 
-    detail::object<T> *p;
+    detail::node *n; 
+    T *p;
 };
 
 
@@ -116,17 +169,22 @@ public:
     template<typename... Args>
     explicit anchor_ptr(std::in_place_t i, Args&&... args) : ptr<T>(i, std::forward<Args>(args)...), detail::anchor_node() {}
 
-    anchor_ptr(ptr<T> p) noexcept : ptr<T>(std::move(p)), detail::anchor_node() {}
+    template<typename U>
+    anchor_ptr(ptr<U> p) noexcept : ptr<T>(std::move(p)), detail::anchor_node() {}
 
     anchor_ptr(const anchor_ptr &other) noexcept : ptr<T>(other), detail::anchor_node() {}
     anchor_ptr(anchor_ptr &&other) noexcept : ptr<T>(std::move(other)), detail::anchor_node() {}
+    
+    template<typename U>
+    anchor_ptr(anchor_ptr<U> other) noexcept : ptr<T>(std::move(other)), detail::anchor_node() {}
 
     anchor_ptr &operator=(std::nullptr_t) {
         ptr<T>::operator=(nullptr);
         return *this;
     }
 
-    anchor_ptr &operator=(ptr<T> other) {
+    template<typename U>
+    anchor_ptr &operator=(ptr<U> other) {
         ptr<T>::operator=(std::move(other));
         return *this;
     }
@@ -141,31 +199,88 @@ public:
         return *this;
     }
     
+    template<typename U>
+    anchor_ptr &operator=(anchor_ptr<U> other) {
+        ptr<T>::operator=(std::move(other));
+        return *this;
+    }
+
     void swap(anchor_ptr &other) noexcept { ptr<T>::swap(other); }
 
 
-    detail::node *detail_get_node() noexcept override { return ptr<T>::p; } 
+    detail::node *detail_get_node() noexcept override { return ptr<T>::n; } 
+    
+private:
+    anchor_ptr(detail::node *n, T *p) noexcept : ptr<T>(n, p), detail::anchor_node() {}
+
+    template<typename V, typename U>
+    friend anchor_ptr<V> static_pointer_cast(anchor_ptr<U> p) noexcept;
+
+    template<typename V, typename U>
+    friend anchor_ptr<V> dynamic_pointer_cast(anchor_ptr<U> p) noexcept;
+
+    template<typename V, typename U>
+    friend anchor_ptr<V> const_pointer_cast(anchor_ptr<U> p) noexcept;
+
+    template<typename V, typename U>
+    friend anchor_ptr<V> reinterpret_pointer_cast(anchor_ptr<U> p) noexcept;
 };
 
 
 
-template<typename T>
-bool operator==(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() == right.get(); }
+template<typename T, typename U>
+bool operator==(const ptr<T> &left, const ptr<U> &right) noexcept { return left.get() == right.get(); }
+
+template<typename T, typename U>
+bool operator!=(const ptr<T> &left, const ptr<U> &right) noexcept { return left.get() != right.get(); }
+
+template<typename T, typename U>
+bool operator<(const ptr<T> &left, const ptr<U> &right) noexcept { return left.get() < right.get(); }
+
+template<typename T, typename U>
+bool operator<=(const ptr<T> &left, const ptr<U> &right) noexcept { return left.get() <= right.get(); }
+
+template<typename T, typename U>
+bool operator>(const ptr<T> &left, const ptr<U> &right) noexcept { return left.get() > right.get(); }
+
+template<typename T, typename U>
+bool operator>=(const ptr<T> &left, const ptr<U> &right) noexcept { return left.get() >= right.get(); }
 
 template<typename T>
-bool operator!=(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() != right.get(); }
+bool operator==(std::nullptr_t, const ptr<T> &right) noexcept { return !right.get(); }
 
 template<typename T>
-bool operator<(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() < right.get(); }
+bool operator!=(std::nullptr_t, const ptr<T> &right) noexcept { return right.get(); }
 
 template<typename T>
-bool operator<=(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() <= right.get(); }
+bool operator<(std::nullptr_t, const ptr<T> &right) noexcept { return right.get(); }
 
 template<typename T>
-bool operator>(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() > right.get(); }
+bool operator<=(std::nullptr_t, const ptr<T> &) noexcept { return true; }
 
 template<typename T>
-bool operator>=(const ptr<T> &left, const ptr<T> &right) noexcept { return left.get() >= right.get(); }
+bool operator>(std::nullptr_t, const ptr<T> &) noexcept { return false; }
+
+template<typename T>
+bool operator>=(std::nullptr_t, const ptr<T> &right) noexcept { return !right.get(); }
+
+template<typename T>
+bool operator==(const ptr<T> &left, std::nullptr_t) noexcept { return !left.get(); }
+
+template<typename T>
+bool operator!=(const ptr<T> &left, std::nullptr_t) noexcept { return left.get(); }
+
+template<typename T>
+bool operator<(const ptr<T> &, std::nullptr_t) noexcept { return false; }
+
+template<typename T>
+bool operator<=(const ptr<T> &left, std::nullptr_t) noexcept { return !left.get(); }
+
+template<typename T>
+bool operator>(const ptr<T> &left, std::nullptr_t) noexcept { return left.get(); }
+
+template<typename T>
+bool operator>=(const ptr<T> &, std::nullptr_t) noexcept { return true; }
 
 
 
@@ -181,8 +296,44 @@ anchor_ptr<T> make_anchor_ptr(Args&&... args) {
 }
 
 
+
+template<typename T, typename U>
+ptr<T> static_pointer_cast(ptr<U> p) noexcept { return ptr<T>(p.n, static_cast<T*>(p.p)); }
+
+template<typename T, typename U>
+ptr<T> dynamic_pointer_cast(ptr<U> p) noexcept { 
+    T *tp = dynamic_cast<T*>(p.p);
+    return ptr<T>(tp ? p.n : nullptr, tp); 
+}
+
+template<typename T, typename U>
+ptr<T> const_pointer_cast(ptr<U> p) noexcept { return ptr<T>(p.n, const_cast<T*>(p.p)); }
+
+template<typename T, typename U>
+ptr<T> reinterpret_pointer_cast(ptr<U> p) noexcept { return ptr<T>(p.n, reinterpret_cast<T*>(p.p)); }
+
+
+template<typename T, typename U>
+anchor_ptr<T> static_pointer_cast(anchor_ptr<U> p) noexcept { return anchor_ptr<T>(p.n, static_cast<T*>(p.p)); }
+
+template<typename T, typename U>
+anchor_ptr<T> dynamic_pointer_cast(anchor_ptr<U> p) noexcept { 
+    T *tp = dynamic_cast<T*>(p.p);
+    return anchor_ptr<T>(tp ? p.n : nullptr, tp); 
+}
+
+template<typename T, typename U>
+anchor_ptr<T> const_pointer_cast(anchor_ptr<U> p) noexcept { return anchor_ptr<T>(p.n, const_cast<T*>(p.p)); }
+
+template<typename T, typename U>
+anchor_ptr<T> reinterpret_pointer_cast(anchor_ptr<U> p) noexcept { return anchor_ptr<T>(p.n, reinterpret_cast<T*>(p.p)); }
+
+
+
 std::size_t object_count();
 std::size_t anchor_count();
+
+extern bool run_on_bad_alloc;
 
 }  // namespace gc
 

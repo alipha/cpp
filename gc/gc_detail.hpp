@@ -165,7 +165,7 @@ struct do_action {
     template<typename U>
     void operator()(ptr<U> &p, action &act) {
         if(p.p)
-            act.detail_perform(p.p);
+            act.detail_perform(p.n);
     }
 };
 

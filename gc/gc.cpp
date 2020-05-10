@@ -8,6 +8,9 @@ using namespace std::string_literals;
 namespace gc {
 
 
+bool run_on_bad_alloc = true;
+
+
 namespace detail {
 
 
