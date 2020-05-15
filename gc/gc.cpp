@@ -1,4 +1,5 @@
 #include "gc.hpp"
+#include <limits>
 
 #ifdef DEBUG
 using namespace std::string_literals;
@@ -14,10 +15,15 @@ bool run_on_bad_alloc = true;
 namespace detail {
 
 
-node active_head{sentinel()};
-node temp_head{sentinel()};
+node active_head;
+node temp_head;
 anchor_node anchor_head{sentinel()};
+
 bool is_running = false;
+bool is_retrying = false;
+std::size_t nested_create_count = 0;
+std::size_t memory_used = 0;
+std::size_t memory_limit = std::numeric_limits<std::size_t>::max();
 
 
 void debug_not_head(node *n, node *allowed_head) {
@@ -148,7 +154,7 @@ void free_unreachable() {
         active_head.prev = &active_head;
     }
 
-    debug_out("free_unreachable: setting reachable = false");
+    //debug_out("free_unreachable: setting reachable = false");
     reset_reachable_flag(active_head);
 }
 
@@ -157,7 +163,7 @@ void reset_reachable_flag(node &head) {
     node *n = head.next;
     while(n != &head) {
         debug_not_head(n, nullptr);
-        if(debug && !n->reachable)
+        if(debug && nested_create_count == 0 && !n->reachable)
             debug_error("free_unreachable: n is not reachable");
         n->reachable = false;
         n = n->next;
@@ -169,7 +175,7 @@ void delete_list(node &head) {
     dec_ref_action dec_action;
     node *next = head.next;
 
-    debug_out("call before_destroy");
+    //debug_out("call before_destroy");
     while(next != &head) {
         debug_not_head(next, nullptr);
         next->before_destroy();
@@ -180,7 +186,7 @@ void delete_list(node &head) {
 
     next = head.next;
 
-    debug_out("deleting list");
+    //debug_out("deleting list");
     while(next != &head) {
         debug_not_head(next, nullptr);
         if(debug && next->ref_count != 0)
@@ -188,7 +194,24 @@ void delete_list(node &head) {
 
         node *current = next;
         next = next->next;
+        memory_used -= current->get_memory_used();
         delete current;
+    }
+}
+
+
+void move_temp_to_active() {
+    if(temp_head.next != &temp_head) {
+        //debug_out("moving temp list to front of head");
+        temp_head.next->prev = &active_head;
+        temp_head.prev->next = active_head.next;
+        active_head.next->prev = temp_head.prev;
+        active_head.next = temp_head.next;
+        debug_not_head(active_head.next, nullptr);
+        debug_not_head(active_head.prev, nullptr);
+
+        temp_head.next = &temp_head;
+        temp_head.prev = &temp_head;
     }
 }
 
@@ -237,7 +260,7 @@ void collect() {
         node = node->next;
     }
 
-    debug_out("collect: freeing unreachables");
+    //debug_out("collect: freeing unreachables");
     detail::free_unreachable();
     
     debug_out("collect: still reachable nodes: " + std::to_string(object_count())
@@ -246,7 +269,7 @@ void collect() {
 
 
 std::size_t object_count() {
-    if(debug) {
+    if(debug && detail::nested_create_count == 0) {
         if(detail::temp_head.next != &detail::temp_head)
             debug_error("temp list is not empty");
         if(detail::temp_head.prev != &detail::temp_head)
@@ -276,6 +299,19 @@ std::size_t anchor_count() {
     }
 
    return count; 
+}
+
+
+std::size_t get_memory_used() { return detail::memory_used; }
+
+
+std::size_t get_memory_limit() { return detail::memory_limit; }
+
+
+void set_memory_limit(std::size_t limit) {
+    detail::memory_limit = limit;
+    if(detail::memory_used > detail::memory_limit)
+        collect();
 }
 
 

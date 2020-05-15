@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <chrono>
 
+#include <string>
+
 
 struct pnode {
     pnode(std::size_t id, bool show_destroy) : id(id), show_destroy(show_destroy) {}
@@ -63,9 +65,16 @@ gc::ptr<node> build_list(std::size_t count, bool show_destroy, bool make_loop) {
 
 
 void deletion_test(std::size_t count, bool show_destroy) {
+    std::cout << "starting deletion test. memory allocated: " << gc::get_memory_used() << std::endl;
+    std::string line;
+    std::getline(std::cin, line);
+
     auto start = std::chrono::high_resolution_clock::now(); 
     gc::anchor_ptr<node> root1 = build_list(count, show_destroy, false);    
     auto end = std::chrono::high_resolution_clock::now(); 
+
+    std::cout << "Memory allocated: " << gc::get_memory_used() << std::endl;
+    std::getline(std::cin, line);
 
     double time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();   
     std::cout << "Build Time: " << time_taken / 1e6 << "ms" << std::endl;
@@ -119,6 +128,7 @@ void deletion_test(std::size_t count, bool show_destroy) {
 
 
 int main() {
+    std::cout << gc::detail::get_memory_used_for<::node>();
     deletion_test(5, true);
     deletion_test(30000000, false);
 

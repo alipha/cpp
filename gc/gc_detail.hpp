@@ -3,13 +3,13 @@
 
 #include <cstddef>
 #include <iterator>
+#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
 
 #ifdef DEBUG
-#include <stdexcept>
 #include <string>
 #endif
 
@@ -33,6 +33,10 @@ constexpr bool debug = false
 namespace gc {
 
 
+extern bool run_on_bad_alloc;
+void collect();
+
+
 template<typename T>
 struct ptr;
 
@@ -40,6 +44,14 @@ template<typename T>
 struct anchor_ptr;
 
 struct action;
+
+
+
+class memory_limit_exceeded : public std::bad_alloc {
+public:
+    const char* what() const noexcept override { return "gc memory limit exceeded"; }
+};
+
 
 
 namespace detail {
@@ -144,11 +156,18 @@ struct anchor_node;
 
 struct sentinel {};
 
+template<typename T>
+struct object;
+
 
 extern node active_head;
 extern node temp_head;
 extern anchor_node anchor_head;
 extern bool is_running;
+extern bool is_retrying;
+extern std::size_t nested_create_count;
+extern std::size_t memory_used;
+extern std::size_t memory_limit;
 
 
 void debug_not_head(node *n, node *allowed_head);
@@ -159,6 +178,13 @@ void free_delayed();
 void free_unreachable();
 void reset_reachable_flag(node &head);
 void delete_list(node &head);
+void move_temp_to_active();
+
+
+template<typename T>
+std::size_t get_memory_used_for() {
+    return sizeof(object<T>) + 8;
+}
 
 
 template<typename T>
@@ -287,13 +313,15 @@ struct list_node {
 
 
 struct node : list_node<node> {
-    node() noexcept { list_insert(active_head); }
-    node(sentinel) noexcept : list_node(this, this) {}
+    node() noexcept : list_node(this, this) {}
     virtual ~node() {}
 
     virtual void transverse(action &) {}
     virtual void before_destroy() {}
     virtual void *get_value() { return nullptr; }
+
+    virtual std::size_t get_memory_used() { return 0; }
+    
 
     void list_remove() {
         if(debug)
@@ -319,6 +347,8 @@ struct object : node {
     void before_destroy() override { apply_to_all<gc::before_destroy>()(value); }
     void *get_value() override { return &value; }
 
+    std::size_t get_memory_used() override { return get_memory_used_for<T>(); }
+
     T value;
 };
 
@@ -337,6 +367,81 @@ struct anchor_node : list_node<anchor_node> {
 #endif
     }
 };
+
+
+
+template<typename T>
+struct creation_tracker {
+    creation_tracker() : has_reset(false) { 
+        ++nested_create_count;
+        memory_used += get_memory_used_for<T>(); 
+    }
+    
+    ~creation_tracker() { reset(); }
+
+    void reset() {
+        if(has_reset)
+            return;
+        has_reset = true;
+        memory_used -= get_memory_used_for<T>();
+        if(--nested_create_count == 0)
+            is_retrying = false;
+    }
+
+    bool has_reset;
+};
+
+
+
+template<typename T, typename... Args>
+object<T> *create_object(Args&&... args) {
+    std::size_t new_memory_used = memory_used + get_memory_used_for<T>();
+    
+    if(new_memory_used > memory_limit) {
+        debug_out(std::to_string(new_memory_used) + " will exceed memory limit "
+                + std::to_string(memory_limit));
+
+        if(run_on_bad_alloc && !is_retrying) {
+            debug_out("retrying on exceeding memory usage");
+            is_retrying = true;
+            collect();
+            return create_object<T>(std::forward<Args>(args)...);
+        } else {
+            is_retrying = false;
+            throw memory_limit_exceeded();
+        }
+    }
+
+    creation_tracker<T> tracker;
+    try {
+        auto node = new detail::object<T>(std::forward<Args>(args)...);
+
+        if(run_on_bad_alloc && !is_retrying) {
+            node->list_insert(nested_create_count > 1 ? temp_head : active_head);
+            if(nested_create_count == 1) {
+                move_temp_to_active();
+            }
+        } else {
+            debug_out("inserting directly to active");
+            node->list_insert(active_head);
+        }
+
+        memory_used += get_memory_used_for<T>();
+        return node;
+    } catch(std::bad_alloc &) {
+
+        if(run_on_bad_alloc && !is_retrying) {
+            debug_out("retrying on bad alloc");
+            tracker.reset();
+            is_retrying = true;
+            collect();
+            return create_object<T>(std::forward<Args>(args)...);
+        } else {
+            throw;
+        }
+    }
+}
+
 
 
 }  // namespace detail

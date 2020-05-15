@@ -13,6 +13,11 @@
 struct graph_node {
     graph_node(std::string name) : name(std::forward<std::string>(name)) {}
 
+    graph_node(std::string name, std::vector<std::string> others) : name(std::forward<std::string>(name)) {
+        for(auto &other_name : others)
+            other_routes.push_back(gc::make_ptr<graph_node>(std::move(other_name)));
+    }
+
     std::string name;
 
     gc::ptr<graph_node> primary_route;
@@ -150,11 +155,65 @@ void composition_tests() {
 
 
 
+void tests() {
+    std::vector<gc::anchor_ptr<graph_node>> anchors{
+        gc::make_ptr<graph_node>("anchor1"), 
+        gc::make_ptr<graph_node>("anchor2")
+    };
+
+    std::vector<std::pair<std::string, std::string>> links{
+        {"anchor1", "bob1"},
+        {"bob1", "steve1"},
+        {"bob1", "fred1"},
+        {"bob1", "paul1"},
+        {"steve1", "fred1"},    // steve1 dies
+        {"chris1", "fred1"},    // chris1 dies
+        {"xany", "steve1"},
+        {"xeuss", "xavier"},
+        {"xavier", "xeuss"},
+        {"xil", "xray"},
+        {"anchor1", "test2"},
+        {"anchor2", "test2"},   // test2 dies
+        {"anchor2", "foo2"},
+        {"anchor2", "moo2"},    // moo2 dies
+        {"moo2", "paul1"},
+        {"paul1", "foo2"},
+        {"anchor2", "meow2"},
+        {"anchor2", "woof2"},
+        {"meow2", "woof2"},
+        {"woof2", "meow2"},
+        {"anchor2", "double2"},
+        {"anchor2", "double2"}
+    };
+
+    create_links(anchors, links);
+    std::cout << "created links" << std::endl;
+
+    gc::collect();
+    std::cout << "collected" << std::endl;
+
+    anchors.pop_back();
+    std::cout << "popped back" << std::endl;
+
+    std::size_t used = gc::get_memory_used();
+    gc::set_memory_limit(used + gc::detail::get_memory_used_for<graph_node>() * 3);
+    gc::anchor_ptr<graph_node> overflows = gc::make_ptr<graph_node>("overflow", std::vector<std::string>{"overflow2", "overflow3", "overflow4", "overflow5"});
+    std::cout << "after memory limit" << std::endl;
+
+    gc::collect();
+    std::cout << "collected again" << std::endl;
+
+
+}
+
+
+
 int main() {
     composition_tests();
     std::cout << "After composition_tests" << std::endl;
     gc::collect();
 
-    //tests();
+    tests();
+    std::cout << gc::get_memory_used() << std::endl;
 }
 

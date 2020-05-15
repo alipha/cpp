@@ -9,9 +9,9 @@
 #include <type_traits>
 #include <typeinfo>
 
+// TODO: make collect() and iterate_from not use global temp_head
 // TODO: const correctness?
 // TODO: use allocators?
-// TODO: separate node from T
 // TODO: exception safe
 // TODO: support T[]
 // TODO: gc::anchor
@@ -24,9 +24,12 @@
 namespace gc {
  
 
-extern bool run_on_bad_alloc;
+std::size_t object_count();
+std::size_t anchor_count();
 
-void collect();
+std::size_t get_memory_used();
+std::size_t get_memory_limit();
+void set_memory_limit(std::size_t limit);
 
 
 template<typename T>
@@ -86,19 +89,7 @@ public:
         detail::transverse_and_mark_reachable(p.n, act);
         debug_out("resetting reachable flag");
         detail::reset_reachable_flag(detail::temp_head);
-        
-        if(detail::temp_head.next != &detail::temp_head) {
-            debug_out("moving temp list to front of head");
-            detail::temp_head.next->prev = &detail::active_head;
-            detail::temp_head.prev->next = detail::active_head.next;
-            detail::active_head.next->prev = detail::temp_head.prev;
-            detail::active_head.next = detail::temp_head.next;
-            detail::debug_not_head(detail::active_head.next, nullptr);
-            detail::debug_not_head(detail::active_head.prev, nullptr);
-
-            detail::temp_head.next = &detail::temp_head;
-            detail::temp_head.prev = &detail::temp_head;
-        }
+        detail::move_temp_to_active();
     }
 
 private:
@@ -122,7 +113,6 @@ private:
         }
     }
 };
-
 
 
 template<typename T>
@@ -240,20 +230,12 @@ protected:
 
     ptr(detail::node *n, T *p) noexcept : n(n), p(p) { if(n) ++n->ref_count; }
 
+
     template<typename... Args>
     static detail::object<T> *create_object(Args&&... args) {
-        try {
-            return new detail::object<T>(std::forward<Args>(args)...);
-        } catch(std::bad_alloc &) {
-            if(run_on_bad_alloc) {
-                debug_out("gc::collect on std::bad_alloc");
-                gc::collect();
-                return new detail::object<T>(std::forward<Args>(args)...);
-            } else {
-                throw;
-            }
-        }
+        return detail::create_object<T>(std::forward<Args>(args)...);
     }
+    
 
     detail::node *n; 
     T *p;
@@ -429,10 +411,6 @@ anchor_ptr<T> const_pointer_cast(anchor_ptr<U> p) noexcept { return anchor_ptr<T
 template<typename T, typename U>
 anchor_ptr<T> reinterpret_pointer_cast(anchor_ptr<U> p) noexcept { return anchor_ptr<T>(p.n, reinterpret_cast<T*>(p.p)); }
 
-
-
-std::size_t object_count();
-std::size_t anchor_count();
 
 
 }  // namespace gc
