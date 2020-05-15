@@ -2,11 +2,8 @@
 #define LIPH_GC_HPP
 
 #include "gc_detail.hpp"
-#include <cstddef>
 #include <functional>
 #include <new>
-#include <utility>
-#include <type_traits>
 #include <typeinfo>
 
 // TODO: make collect() and iterate_from not use global temp_head
@@ -308,6 +305,36 @@ private:
     template<typename V, typename U>
     friend anchor_ptr<V> reinterpret_pointer_cast(anchor_ptr<U> p) noexcept;
 };
+
+
+
+template<typename T>
+struct allocator {
+    using value_type = T;
+    using propagate_on_container_move_assignment = std::true_type;
+    using is_always_equal = std::true_type;
+
+    allocator() noexcept = default;
+    
+    template<typename U>
+    allocator(const allocator<U> &) noexcept {}
+
+    template<typename U>
+    allocator &operator=(const allocator<U> &) noexcept { return *this; }
+
+    T *allocate(std::size_t n) { return detail::allocate<T>(n, true); }
+
+    void deallocate(T *p, std::size_t n) {
+        std::allocator<T>().deallocate(p, n);
+        detail::memory_used -= sizeof(T) * n + 8;
+    }
+};
+
+template<typename T, typename U>
+bool operator==(allocator<T>, allocator<U>) { return true; }
+
+template<typename T, typename U>
+bool operator!=(allocator<T>, allocator<U>) { return false; }
 
 
 

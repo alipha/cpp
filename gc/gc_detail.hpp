@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <iterator>
+#include <memory>
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
@@ -442,6 +443,37 @@ object<T> *create_object(Args&&... args) {
     }
 }
 
+
+template<typename T>
+T *allocate(std::size_t n, bool retry) {
+    std::size_t new_memory_used = memory_used + sizeof(T) * n + 8;
+    
+    if(new_memory_used > memory_limit) {
+        debug_out("allocator: " + std::to_string(new_memory_used) 
+                + " will exceed memory limit " + std::to_string(memory_limit));
+        if(run_on_bad_alloc && retry) {
+            debug_out("allocator: retrying");
+            collect();
+            return allocate<T>(n, false);
+        } else {
+            throw memory_limit_exceeded();
+        }
+    }
+
+    try {
+        T *p = std::allocator<T>().allocate(n); 
+        memory_used = new_memory_used;
+        return p;
+    } catch(std::bad_alloc &) {
+        if(run_on_bad_alloc && retry) {
+            debug_out("allocator: retrying on bad alloc");
+            collect();
+            return allocate<T>(n, false);
+        } else {
+            throw;
+        }
+    }
+}
 
 
 }  // namespace detail
