@@ -6,17 +6,6 @@
 #include <new>
 #include <typeinfo>
 
-// TODO: make collect() and iterate_from not use global temp_head
-// TODO: const correctness?
-// TODO: use allocators?
-// TODO: exception safe
-// TODO: support T[]
-// TODO: gc::anchor
-// TODO: weak_ptr
-// TODO: on gc::ptr constructor, call transverse and check
-//       that all gc::ptrs that have been created are
-//       reached via transverse.
-
 
 namespace gc {
  
@@ -32,6 +21,8 @@ void set_memory_limit(std::size_t limit);
 template<typename T>
 class ptr;
 
+template<typename T>
+class anchor;
 
 template<typename... Types>
 struct for_types {};
@@ -84,7 +75,18 @@ public:
     static void iterate_from(ptr<T> &p, Func &&func) {
         custom_action<Func> act(func);
         detail::transverse_and_mark_reachable(p.n, act);
-        debug_out("resetting reachable flag");
+        debug_out("iterate_from: ptr: resetting reachable flag");
+        detail::reset_reachable_flag(detail::temp_head);
+        detail::move_temp_to_active();
+    }
+
+
+    // TODO: const overload?
+    template<typename T, typename Func>
+    static void iterate_from(anchor<T> &n, Func &&func) {
+        custom_action<Func> act(func);
+        detail::transverse_and_mark_reachable(n, act);
+        debug_out("iterate_from: anchor: resetting reachable flag");
         detail::reset_reachable_flag(detail::temp_head);
         detail::move_temp_to_active();
     }
@@ -288,7 +290,7 @@ public:
     void swap(anchor_ptr &other) noexcept { ptr<T>::swap(other); }
 
 
-    detail::node *detail_get_node() noexcept override { return ptr<T>::n; } 
+    detail::node *detail_get_node() const noexcept override { return ptr<T>::n; } 
     
 private:
     anchor_ptr(detail::node *n, T *p) noexcept : ptr<T>(n, p), detail::anchor_node() {}
@@ -304,6 +306,78 @@ private:
 
     template<typename V, typename U>
     friend anchor_ptr<V> reinterpret_pointer_cast(anchor_ptr<U> p) noexcept;
+};
+
+
+
+template<typename T>
+class anchor : public detail::anchor_node {
+public:
+    anchor() : detail::anchor_node(), value() {}
+    anchor(T val) : detail::anchor_node(), value(std::move(val)) {}
+    
+    template<typename... Args>
+    anchor(std::in_place_t, Args&&... args) : detail::anchor_node(), value(std::forward<Args>(args)...)  {}
+
+    anchor(const anchor &other) noexcept(std::is_nothrow_copy_constructible_v<T>)
+        : detail::anchor_node(), value(other) {}
+
+    anchor(anchor &&other) noexcept(std::is_nothrow_move_constructible_v<T>)
+        : detail::anchor_node(), value(std::move(other.value)) {}
+    
+    template<typename U>
+    anchor(anchor<U> other) : detail::anchor_node(), value(std::move(other.value)) {}
+
+
+    anchor &operator=(T val) {
+        value = std::move(val);
+        return *this;
+    }
+
+    anchor &operator=(const anchor &other) {
+        value = other.value;
+        return *this;
+    }
+    
+    anchor &operator=(anchor &&other) {
+        value = std::move(other.value);
+        return *this;
+    }
+    
+    template<typename U>
+    anchor &operator=(anchor<U> other) {
+        value = std::move(other.value);
+        return *this;
+    }
+
+    const T &get() const noexcept { return value; }
+
+    const T *operator->() const noexcept { return &value; }
+    const T &operator*() const noexcept { return value; } 
+
+    T &get() noexcept { return value; }
+
+    T *operator->() noexcept { return &value; }
+    T &operator*() noexcept { return value; } 
+    
+    void swap(anchor &other) noexcept {
+        using std::swap;
+        swap(value, other.value);
+    }
+    
+    void detail_transverse(action &act) override { 
+        detail::apply_to_all<transverse>()(value, act);
+    }
+
+    //void detail_transverse(action &act) const override { 
+    //    detail::apply_to_all<transverse>()(value, act);
+    //}
+
+private:
+    template<typename... Types>  // TODO
+    friend struct for_types;
+
+    T value;
 };
 
 
@@ -394,6 +468,26 @@ bool operator>=(const ptr<T> &, std::nullptr_t) noexcept { return true; }
 
 
 
+template<typename T>
+bool operator==(const anchor<T> &left, const anchor<T> &right) noexcept { return left.get() == right.get(); }
+
+template<typename T>
+bool operator!=(const anchor<T> &left, const anchor<T> &right) noexcept { return left.get() != right.get(); }
+
+template<typename T>
+bool operator<(const anchor<T> &left, const anchor<T> &right) noexcept { return left.get() < right.get(); }
+
+template<typename T>
+bool operator<=(const anchor<T> &left, const anchor<T> &right) noexcept { return left.get() <= right.get(); }
+
+template<typename T>
+bool operator>(const anchor<T> &left, const anchor<T> &right) noexcept { return left.get() > right.get(); }
+
+template<typename T>
+bool operator>=(const anchor<T> &left, const anchor<T> &right) noexcept { return left.get() >= right.get(); }
+
+
+
 template<typename T, typename... Args>
 ptr<T> make_ptr(Args&&... args) {
     return ptr<T>(std::in_place_t(), std::forward<Args>(args)...); 
@@ -403,6 +497,12 @@ ptr<T> make_ptr(Args&&... args) {
 template<typename T, typename... Args>
 anchor_ptr<T> make_anchor_ptr(Args&&... args) {
     return anchor_ptr<T>(std::in_place_t(), std::forward<Args>(args)...); 
+}
+
+
+template<typename T, typename... Args>
+anchor<T> make_anchor(Args&&... args) {
+    return anchor<T>(std::in_place_t(), std::forward<Args>(args)...); 
 }
 
 
@@ -453,6 +553,9 @@ namespace std {
     void swap(gc::anchor_ptr<T> &left, gc::anchor_ptr<T> &right) noexcept { left.swap(right); }
 
     template<typename T>
+    void swap(gc::anchor<T> &left, gc::anchor<T> &right) noexcept { left.swap(right); }
+
+    template<typename T>
     struct hash<gc::ptr<T>> {
         std::size_t operator()(const gc::ptr<T> &p) const { return std::hash<T*>()(p.get()); }
     };
@@ -460,6 +563,11 @@ namespace std {
     template<typename T>
     struct hash<gc::anchor_ptr<T>> {
         std::size_t operator()(const gc::anchor_ptr<T> &p) const { return std::hash<T*>()(p.get()); }
+    };
+
+    template<typename T>
+    struct hash<gc::anchor<T>> {
+        std::size_t operator()(const gc::anchor<T> &n) const { return std::hash<T>()(n.get()); }
     };
 
 }  // namespace std

@@ -103,6 +103,14 @@ void transverse_list(node &head, node *old_head, action &act) {
 }
 
 
+void transverse_and_mark_reachable(anchor_node &n, action &act) {
+    node *old_head = temp_head.next;
+    n.detail_transverse(act);
+
+	transverse_list(temp_head, old_head, act);
+}
+
+
 void transverse_and_mark_reachable(node *ptr, action &act) {
     if(!ptr || !act.detail_perform(ptr))
         return;
@@ -111,6 +119,12 @@ void transverse_and_mark_reachable(node *ptr, action &act) {
     ptr->transverse(act);
 
 	transverse_list(temp_head, old_head, act);
+}
+
+
+void transverse_and_mark_reachable(anchor_node &n) {
+    mark_reachable_action act;
+    transverse_and_mark_reachable(n, act);
 }
 
 
@@ -256,7 +270,10 @@ void collect() {
             + ", anchors: " + std::to_string(anchor_count()));
 
     while(node != &detail::anchor_head) {
-        detail::transverse_and_mark_reachable(node->detail_get_node());
+        if(detail::node *n = node->detail_get_node())
+            detail::transverse_and_mark_reachable(n);
+        else
+            detail::transverse_and_mark_reachable(*node);
         node = node->next;
     }
 

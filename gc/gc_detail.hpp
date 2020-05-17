@@ -5,6 +5,8 @@
 #include <iterator>
 #include <memory>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -24,14 +26,26 @@
 #define debug_error(x) do {} while(0)
 #endif
 
+
+// TODO: make collect() and iterate_from not use global temp_head
+// TODO: const correctness?
+// TODO: use allocators?
+// TODO: exception safe
+// TODO: support T[]
+// TODO: weak_ptr
+// TODO: on gc::ptr constructor, call transverse and check
+//       that all gc::ptrs that have been created are
+//       reached via transverse.
+
+
+namespace gc {
+
+
 constexpr bool debug = false
 #ifdef DEBUG
     || true
 #endif
     ;
-
-
-namespace gc {
 
 
 extern bool run_on_bad_alloc;
@@ -61,11 +75,23 @@ namespace detail {
 using std::begin;
 using std::end;
 
+
+template<typename T>
+constexpr bool is_string_v = false;
+
+template<typename CharT, typename Traits, typename Alloc>
+constexpr bool is_string_v<std::basic_string<CharT, Traits, Alloc>> = true;
+
+template<typename CharT, typename Traits>
+constexpr bool is_string_v<std::basic_string_view<CharT, Traits>> = true;
+
+
 template<typename T, typename = std::void_t<>>
 constexpr bool is_container_v = false;
 
 template<typename T>
-constexpr bool is_container_v<T, std::void_t<decltype(begin(std::declval<T&>()), end(std::declval<T&>()))>> = true;
+constexpr bool is_container_v<T, std::void_t<decltype(begin(std::declval<T&>()), end(std::declval<T&>()))>> 
+    = !is_string_v<std::decay_t<T>>;
 
 
 template<typename T, typename = std::void_t<>>
@@ -99,6 +125,11 @@ struct node;
 
 template<typename T>
 struct transverse {
+    //template<typename U = T>
+    //std::enable_if_t<detail::has_transverse_v<U> && !std::is_const_v<T>> operator()(const T &obj, action &act) { 
+    //    obj.transverse(act); 
+    //}
+
     template<typename U = T>
     std::enable_if_t<detail::has_transverse_v<U>> operator()(T &obj, action &act) { 
         obj.transverse(act); 
@@ -173,7 +204,9 @@ extern std::size_t memory_limit;
 
 void debug_not_head(node *n, node *allowed_head);
 void transverse_list(node &head, node *old_head, action &act);
+void transverse_and_mark_reachable(anchor_node &n, action &act);
 void transverse_and_mark_reachable(node *ptr, action &act);
+void transverse_and_mark_reachable(anchor_node &n);
 void transverse_and_mark_reachable(node *ptr);
 void free_delayed();
 void free_unreachable();
@@ -278,9 +311,9 @@ struct apply_to_all {
         static_assert(can_apply_T || can_apply_U, "expected one of the types in the std::pair to be transversable");
 
         if constexpr(can_apply_T)
-            apply_to_all<Func>()(p.left, args...);
+            apply_to_all<Func>()(p.first, args...);
         if constexpr(can_apply_U)
-            apply_to_all<Func>()(p.right, args...);
+            apply_to_all<Func>()(p.second, args...);
     }
 };
 
@@ -360,13 +393,10 @@ struct anchor_node : list_node<anchor_node> {
 
     ~anchor_node() { list_remove(); }
 
-    virtual node *detail_get_node() noexcept(!debug) { 
-#ifdef DEBUG
-        throw std::logic_error("anchor_node::detail_get_node called");
-#else
-        return nullptr; 
-#endif
-    }
+    virtual void detail_transverse(action &) {}
+    //virtual void detail_transverse(action &) const {}
+
+    virtual node *detail_get_node() const noexcept { return nullptr; } 
 };
 
 

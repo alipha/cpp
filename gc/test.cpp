@@ -11,6 +11,7 @@
 
 
 struct graph_node {
+    graph_node() : name("<default>") {}
     graph_node(std::string name) : name(std::forward<std::string>(name)) {}
 
     graph_node(std::string name, std::vector<std::string> others) : name(std::forward<std::string>(name)) {
@@ -35,6 +36,9 @@ struct graph_node {
 
     void before_destroy();
 };
+
+
+bool operator<(const graph_node &left, const graph_node &right) { return left.name < right.name; }
 
 
 using variant_obj = std::variant<int, graph_node, std::vector<graph_node>>;
@@ -66,19 +70,19 @@ void graph_node::before_destroy() {
 
 
 void create_links(std::vector<gc::anchor_ptr<graph_node>> &anchors, std::vector<std::pair<std::string, std::string>> &links) {
-    std::map<std::string, gc::anchor_ptr<graph_node>> node_by_name;
+    gc::anchor<std::map<std::string, gc::ptr<graph_node>>> node_by_name;
 
     for(auto &anchor : anchors)
-        node_by_name[anchor->name] = anchor;
+        (*node_by_name)[anchor->name] = anchor;
 
     for(auto &link : links) {
-        auto from_it = node_by_name.find(link.first);
-        if(from_it == node_by_name.end())
-            from_it = node_by_name.try_emplace(link.first, gc::make_anchor_ptr<graph_node>(link.first)).first;
+        auto from_it = node_by_name->find(link.first);
+        if(from_it == node_by_name->end())
+            from_it = node_by_name->try_emplace(link.first, gc::make_ptr<graph_node>(link.first)).first;
         
-        auto to_it = node_by_name.find(link.second);
-        if(to_it == node_by_name.end())
-            to_it = node_by_name.try_emplace(link.second, gc::make_anchor_ptr<graph_node>(link.second)).first;
+        auto to_it = node_by_name->find(link.second);
+        if(to_it == node_by_name->end())
+            to_it = node_by_name->try_emplace(link.second, gc::make_ptr<graph_node>(link.second)).first;
 
         if(!from_it->second->primary_route)
             from_it->second->primary_route = to_it->second;
@@ -90,7 +94,11 @@ void create_links(std::vector<gc::anchor_ptr<graph_node>> &anchors, std::vector<
 
 
 void composition_tests() {
-    gc::anchor_ptr<graph_node> one_anchor = gc::make_anchor_ptr<graph_node>("OneAnchor");
+    gc::anchor<graph_node> one_anchor = gc::make_anchor<graph_node>("OneAnchor");
+    gc::anchor<graph_node> two_anchor(graph_node("TwoAnchor"));
+    two_anchor = one_anchor;
+    two_anchor = graph_node("TwoAnchor2");
+
     gc::anchor_ptr<graph_node> null_anchor;
     {
         // don't do this. only use gc::anchor_ptr for local variables. this is just a cheap way to test cleanup behavior
@@ -106,6 +114,12 @@ void composition_tests() {
     anchors.emplace_back();
     anchors.push_back(gc::make_ptr<graph_node>("Vector2"));
     anchors[1] = gc::make_ptr<graph_node>("Vector1");
+        
+    gc::anchor<std::vector<graph_node>> anchors2;
+    anchors2->emplace_back("2Vector0");
+    anchors2->emplace_back();
+    anchors2->push_back(graph_node("2Vector2"));
+    anchors2.get()[1] = graph_node("2Vector1");
 
     {
         // don't do this. only use gc::anchor_ptr for local variables. this is just a cheap way to test cleanup behavior
@@ -114,6 +128,7 @@ void composition_tests() {
         ptrs->emplace_back("UnVector1");
     }
     std::set<gc::anchor_ptr<graph_node>> anchor_set(anchors.begin(), anchors.end());
+    //gc::anchor<std::set<graph_node>> anchor_set2(std::in_place_t(), anchors2->begin(), anchors2->end());
 
     {
         // don't do this. only use gc::anchor_ptr for local variables. this is just a cheap way to test cleanup behavior
@@ -124,6 +139,7 @@ void composition_tests() {
     variant_anchor var_an = gc::make_anchor_ptr<graph_node>("VariantAnchor");
     variant_anchor var_ans = std::vector<gc::anchor_ptr<graph_node>>(2, gc::make_anchor_ptr<graph_node>("VariantAnchors"));
     gc::anchor_ptr<variant_ptr> anchor_var = gc::make_anchor_ptr<variant_ptr>(gc::make_ptr<graph_node>("AnchorVariant"));
+    gc::anchor<variant_ptr> anchor_var2 = gc::make_anchor<variant_ptr>(gc::make_ptr<graph_node>("AnchorVariant"));
 
     {
         // don't do this. only use gc::anchor_ptr for local variables. this is just a cheap way to test cleanup behavior
@@ -134,6 +150,8 @@ void composition_tests() {
 
     gc::anchor_ptr<variant_obj> ptr_variant = gc::make_anchor_ptr<variant_obj>(graph_node("PtrVariant"));
     gc::anchor_ptr<variant_obj> ptr_variant2 = gc::make_ptr<variant_obj>(3);
+    gc::anchor<variant_obj> anchor_variant(graph_node("PtrVariant"));
+    gc::anchor<variant_obj> anchor_variant2(3);
 
     gc::anchor_ptr<tuple_ptr> anchor_tup = gc::make_ptr<tuple_ptr>(4, 
             gc::make_ptr<graph_node>("AnchorTuple"), 
@@ -148,6 +166,7 @@ void composition_tests() {
    
 
     gc::anchor_ptr<gc::ptr<graph_node>> foo = gc::make_anchor_ptr<gc::ptr<graph_node>>(gc::make_ptr<graph_node>("test"));
+    gc::anchor<gc::ptr<graph_node>> foo2 = gc::ptr<graph_node>(gc::make_ptr<graph_node>("test"));
 
     std::cout << "Before collect in composition_tests" << std::endl;
     gc::collect();
