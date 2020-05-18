@@ -67,7 +67,8 @@ auto rect_or_circle = [](auto &&s) {
 
 
 
-void test_iterate_from(gc::ptr<shape> p) {
+template<typename T>
+void test_iterate_from(T &p) {
     std::cout << std::endl << "start group" << std::endl;
     gc::for_types<rectangle>::iterate_from(p, rect_only);
    
@@ -119,4 +120,10 @@ int main() {
     test_iterate_from(r->inner);
     test_iterate_from(r->inner->inner);
     test_iterate_from(r->inner->inner->inner);
+
+    gc::anchor<rectangle> ra = *r;
+    test_iterate_from(ra);
+    test_iterate_from(ra->inner);
+    test_iterate_from(ra->inner->inner);
+    test_iterate_from(ra->inner->inner->inner);
 }

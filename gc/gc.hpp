@@ -148,11 +148,11 @@ public:
     }
 
     ptr &operator=(const ptr &other) {
+        if(other.n)
+            ++other.n->ref_count;
         reset();
         n = other.n;
         p = other.p;
-        if(n)
-            ++n->ref_count;
         return *this;
     }
 
