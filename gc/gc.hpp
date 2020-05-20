@@ -51,7 +51,7 @@ private:
         bool detail_perform(detail::node *node) override { 
             if(debug && !node)
                 throw std::logic_error("custom_action: null");
-            node->mark_reachable(false);
+            node->mark_reachable();
             run_on_node(node, func);
             return true;
         }
@@ -374,7 +374,7 @@ public:
     //}
 
 private:
-    template<typename... Types>  // TODO
+    template<typename... Types>
     friend struct for_types;
 
     T value;

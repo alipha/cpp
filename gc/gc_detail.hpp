@@ -211,7 +211,7 @@ void transverse_and_mark_reachable(node *ptr);
 void free_delayed();
 void free_unreachable();
 void reset_reachable_flag(node &head);
-void delete_list(node &head);
+void delete_list(node &head, bool dec_counts);
 void move_temp_to_active();
 
 
@@ -363,7 +363,7 @@ struct node : list_node<node> {
         list_node<node>::list_remove();
     }
 
-    bool mark_reachable(bool update_ref_count = true);
+    bool mark_reachable();
     void free();
 
     std::size_t ref_count = 1;
@@ -449,13 +449,13 @@ object<T> *create_object(Args&&... args) {
 
         if(run_on_bad_alloc && !is_retrying) {
             node->list_insert(nested_create_count > 1 ? temp_head : active_head);
-            if(nested_create_count == 1) {
-                move_temp_to_active();
-            }
         } else {
             debug_out("inserting directly to active");
             node->list_insert(active_head);
         }
+        
+        if(nested_create_count == 1)
+            move_temp_to_active();
 
         memory_used += get_memory_used_for<T>();
         return node;
