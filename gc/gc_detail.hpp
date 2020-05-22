@@ -3,21 +3,102 @@
 
 #include <cstddef>
 #include <iterator>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
+
+#ifdef DEBUG
+#include <string>
+#endif
+
+#ifdef DEBUG_OUT
+#include <iostream>
+
+#define debug_out(x) do { std::cerr << "DEBUG: " << x << std::endl; } while(0)
+#define debug_error(x) do { std::cerr << "ERROR: " << x << std::endl; } while(0)
+#else
+#define debug_out(x) do {} while(0)
+#define debug_error(x) do {} while(0)
+#endif
+
+
+// TODO: make collect() and iterate_from not use global temp_head
+// TODO: const correctness?
+// TODO: use allocators?
+// TODO: exception safe
+// TODO: support T[]
+// TODO: weak_ptr
+// TODO: on gc::ptr constructor, call transverse and check
+//       that all gc::ptrs that have been created are
+//       reached via transverse.
 
 
 namespace gc {
 
 
+constexpr bool debug = false
+#ifdef DEBUG
+    || true
+#endif
+    ;
+
+
+extern bool run_on_bad_alloc;
+void collect();
+
+
+template<typename T>
+struct ptr;
+
+template<typename T>
+struct anchor_ptr;
+
+struct action;
+
+
+
+class memory_limit_exceeded : public std::bad_alloc {
+public:
+    const char* what() const noexcept override { return "gc memory limit exceeded"; }
+};
+
+
+
 namespace detail {
+
+
+using std::begin;
+using std::end;
+
+
+template<typename T>
+constexpr bool is_string_v = false;
+
+template<typename CharT, typename Traits, typename Alloc>
+constexpr bool is_string_v<std::basic_string<CharT, Traits, Alloc>> = true;
+
+template<typename CharT, typename Traits>
+constexpr bool is_string_v<std::basic_string_view<CharT, Traits>> = true;
 
 
 template<typename T, typename = std::void_t<>>
 constexpr bool is_container_v = false;
 
 template<typename T>
-constexpr bool is_container_v<T, std::void_t<decltype(std::begin(std::declval<T>()), std::end(std::declval<T>()))>> = true;
+constexpr bool is_container_v<T, std::void_t<decltype(begin(std::declval<T&>()), end(std::declval<T&>()))>> 
+    = !is_string_v<std::decay_t<T>>;
+
+
+template<typename T, typename = std::void_t<>>
+constexpr bool has_transverse_v = false;
+
+template<typename T>
+constexpr bool has_transverse_v<T, std::void_t<decltype(std::declval<T>().transverse(std::declval<action&>()))>> = true;
 
 
 template<typename T, typename = std::void_t<>>
@@ -27,23 +108,31 @@ template<typename T>
 constexpr bool has_before_destroy_v<T, std::void_t<decltype(std::declval<T>().before_destroy())>> = true;
 
 
+
+template<typename T>
+struct do_action;
+
+template<template<typename> typename Func>
+struct apply_to_all;
+
+
+struct node;
+
+
 }  // namespace detail
 
-
-struct action;
 
 
 template<typename T>
 struct transverse {
+    //template<typename U = T>
+    //std::enable_if_t<detail::has_transverse_v<U> && !std::is_const_v<T>> operator()(const T &obj, action &act) { 
+    //    obj.transverse(act); 
+    //}
+
     template<typename U = T>
-    std::enable_if_t<!detail::is_container_v<U>> operator()(T &obj, action &act) { 
+    std::enable_if_t<detail::has_transverse_v<U>> operator()(T &obj, action &act) { 
         obj.transverse(act); 
-    }
-    
-    template<typename U = T>
-    std::enable_if_t<detail::is_container_v<U>> operator()(T &container, action &act) {
-        for(auto &obj : container)
-            transverse<decltype(obj)>()(obj, act); 
     }
 };
 
@@ -54,13 +143,39 @@ struct before_destroy {
     std::enable_if_t<detail::has_before_destroy_v<U>> operator()(T &obj) { obj.before_destroy(); }
 
     template<typename U = T>
-    std::enable_if_t<detail::is_container_v<U>> operator()(T &container) {
-        for(auto &obj : container)
-            before_destroy<decltype(obj)>()(obj); 
+    std::enable_if_t<!detail::has_before_destroy_v<U>> operator()(T &) {}
+};
+
+/*
+template<typename T>
+struct transverse<T&> : transverse<T> {};
+
+template<typename T>
+struct transverse<T&&> : transverse<T> {};
+*/
+
+
+
+template<typename T>
+struct transverse<ptr<T>> {
+    void operator()(ptr<T> &p, action &act) { act(p); }
+};
+
+
+template<typename T>
+struct transverse<anchor_ptr<T>> {
+    void operator()(anchor_ptr<T> &p, action &act) { act(p); }
+};
+
+
+
+struct action {
+    template<typename T>
+    void operator()(T &obj) {
+        detail::apply_to_all<detail::do_action>()(obj, *this);
     }
 
-    template<typename U = T>
-    std::enable_if_t<!detail::has_before_destroy_v<U> && !detail::is_container_v<U>> operator()(T &) {}
+    virtual bool detail_perform(detail::node *node) = 0;
 };
 
 
@@ -73,18 +188,134 @@ struct anchor_node;
 
 struct sentinel {};
 
+template<typename T>
+struct object;
 
-extern node head;
-extern node delayed_free_head;
-extern node reachable_head;
+
+extern node active_head;
+extern node temp_head;
 extern anchor_node anchor_head;
 extern bool is_running;
+extern bool is_retrying;
+extern std::size_t nested_create_count;
+extern std::size_t memory_used;
+extern std::size_t memory_limit;
 
 
-void mark_reachable(node *ptr);
+void debug_not_head(node *n, node *allowed_head);
+void transverse_list(node &head, node *old_head, action &act);
+void transverse_and_mark_reachable(anchor_node &n, action &act);
+void transverse_and_mark_reachable(node *ptr, action &act);
+void transverse_and_mark_reachable(anchor_node &n);
+void transverse_and_mark_reachable(node *ptr);
 void free_delayed();
 void free_unreachable();
-void delete_list(node &head);
+void reset_reachable_flag(node &head);
+void delete_list(node &head, bool dec_counts);
+void move_temp_to_active();
+
+
+template<typename T>
+std::size_t get_memory_used_for() {
+    return sizeof(object<T>) + 8;
+}
+
+
+template<typename T>
+struct do_action {
+    template<typename U>
+    void operator()(ptr<U> &p, action &act) {
+        if(p.p)
+            act.detail_perform(p.n);
+    }
+};
+
+
+template<typename T, typename V, size_t... I>
+void tuple_visit_impl(V&& v, T&& t, std::index_sequence<I...>)
+{
+    (..., v(std::get<I>(t)));
+}
+
+template<typename V, typename T>
+void tuple_visit(V&& v, T&& t)
+{
+    tuple_visit_impl(std::forward<V>(v), std::forward<T>(t),
+        std::make_index_sequence<std::tuple_size_v<std::decay_t<T>>>());
+}
+
+
+template<typename T, template<typename> typename Func, typename... Args>
+constexpr bool can_apply(long) { return false; }
+
+template<typename T, template<typename> typename Func, typename... Args>
+constexpr bool can_apply(int, std::void_t<decltype(Func<T>()(std::declval<T&>(), std::declval<Args&>()...))>* = 0) { return true; }
+
+
+template<typename T, template<typename> typename Func, typename... Args>
+constexpr bool can_apply_to_all(long) { return false; }
+
+template<typename T, template<typename> typename Func, typename... Args>
+constexpr bool can_apply_to_all(int, std::void_t<decltype(apply_to_all<Func>()(std::declval<T&>(), std::declval<Args&>()...))>* = 0) { return true; }
+
+
+
+template<template<typename> typename Func>
+struct apply_to_all {
+    template<typename T, typename... Args>
+    std::enable_if_t<!detail::is_container_v<T> && can_apply<T, Func, Args...>(0)> 
+    operator()(T &obj, Args&&... args) {
+        Func<T>()(obj, std::forward<Args>(args)...);
+    }
+
+    template<typename T, typename... Args>
+    std::enable_if_t<detail::is_container_v<T>> operator()(T &container, Args&&... args) {
+        for(auto &obj : container)
+            apply_to_all<Func>()(obj, std::forward<Args>(args)...);
+    }
+
+    template<typename... Ts, typename... Args>
+    void operator()(std::variant<Ts...> &v, Args&... args) {
+        static_assert((false || ... || can_apply_to_all<Ts, Func, Args...>(0)), 
+                "expected at least one T in std::variant to be transversable");
+
+        std::visit([&](auto &obj) {
+            if constexpr(can_apply_to_all<decltype(obj), Func, Args...>(0)) {
+                debug_out("can apply");
+                apply_to_all<Func>()(obj, args...);
+            } else {
+                debug_out("CAN'T apply");
+            }
+        }, v);
+    }
+
+    template<typename... Ts, typename... Args>
+    void operator()(std::tuple<Ts...> &t, Args&... args) {
+        static_assert((false || ... || can_apply_to_all<Ts, Func, Args...>(0)), 
+                "expected at least one T in std::tuple to be transversable");
+
+        tuple_visit([&](auto &obj) {
+            if constexpr(can_apply_to_all<decltype(obj), Func, Args...>(0)) {
+                debug_out("tuple: can apply");
+                apply_to_all<Func>()(obj, args...);
+            } else {
+                debug_out("tuple: CAN'T apply");
+            }
+        }, t);
+    }
+
+    template<typename T, typename U, typename... Args>
+    void operator()(std::pair<T, U> &p, Args&&... args) {
+        constexpr bool can_apply_T = can_apply_to_all<T, Func, Args...>(0);
+        constexpr bool can_apply_U = can_apply_to_all<U, Func, Args...>(0);
+        static_assert(can_apply_T || can_apply_U, "expected one of the types in the std::pair to be transversable");
+
+        if constexpr(can_apply_T)
+            apply_to_all<Func>()(p.first, args...);
+        if constexpr(can_apply_U)
+            apply_to_all<Func>()(p.second, args...);
+    }
+};
 
 
 
@@ -116,29 +347,41 @@ struct list_node {
 
 
 struct node : list_node<node> {
-    node() noexcept { list_insert(head); }
-    node(sentinel) noexcept : list_node(this, this) {}
+    node() noexcept : list_node(this, this) {}
     virtual ~node() {}
 
     virtual void transverse(action &) {}
     virtual void before_destroy() {}
+    virtual void *get_value() { return nullptr; }
+
+    virtual std::size_t get_memory_used() { return 0; }
+    
+
+    void list_remove() {
+        if(debug)
+            debug_not_head(this, nullptr);
+        list_node<node>::list_remove();
+    }
 
     bool mark_reachable();
     void free();
 
-    std::size_t ref_count = 0;
+    std::size_t ref_count = 1;
     bool reachable = false;
 };
 
 
 
 template<typename T>
-struct object : transverse<T>, before_destroy<T>, node {
+struct object : node {
     template<typename... Args>
     object(Args&&... args) : node(), value(std::forward<Args>(args)...) {}
 
-    void transverse(action &act) override { gc::transverse<T>::operator()(value, act); }
-    void before_destroy() override { gc::before_destroy<T>::operator()(value); }
+    void transverse(action &act) override { apply_to_all<gc::transverse>()(value, act); }
+    void before_destroy() override { apply_to_all<gc::before_destroy>()(value); }
+    void *get_value() override { return &value; }
+
+    std::size_t get_memory_used() override { return get_memory_used_for<T>(); }
 
     T value;
 };
@@ -150,9 +393,117 @@ struct anchor_node : list_node<anchor_node> {
 
     ~anchor_node() { list_remove(); }
 
-    virtual node *detail_get_node() noexcept { return nullptr; }
+    virtual void detail_transverse(action &) {}
+    //virtual void detail_transverse(action &) const {}
+
+    virtual node *detail_get_node() const noexcept { return nullptr; } 
 };
 
+
+
+template<typename T>
+struct creation_tracker {
+    creation_tracker() : has_reset(false) { 
+        ++nested_create_count;
+        memory_used += get_memory_used_for<T>(); 
+    }
+    
+    ~creation_tracker() { reset(); }
+
+    void reset() {
+        if(has_reset)
+            return;
+        has_reset = true;
+        memory_used -= get_memory_used_for<T>();
+        if(--nested_create_count == 0)
+            is_retrying = false;
+    }
+
+    bool has_reset;
+};
+
+
+
+template<typename T, typename... Args>
+object<T> *create_object(Args&&... args) {
+    std::size_t new_memory_used = memory_used + get_memory_used_for<T>();
+    
+    if(new_memory_used > memory_limit) {
+        debug_out(std::to_string(new_memory_used) + " will exceed memory limit "
+                + std::to_string(memory_limit));
+
+        if(run_on_bad_alloc && !is_retrying) {
+            debug_out("retrying on exceeding memory usage");
+            is_retrying = true;
+            collect();
+            return create_object<T>(std::forward<Args>(args)...);
+        } else {
+            is_retrying = false;
+            throw memory_limit_exceeded();
+        }
+    }
+
+    creation_tracker<T> tracker;
+    try {
+        auto node = new detail::object<T>(std::forward<Args>(args)...);
+
+        if(run_on_bad_alloc && !is_retrying) {
+            node->list_insert(nested_create_count > 1 ? temp_head : active_head);
+        } else {
+            debug_out("inserting directly to active");
+            node->list_insert(active_head);
+        }
+        
+        if(nested_create_count == 1)
+            move_temp_to_active();
+
+        memory_used += get_memory_used_for<T>();
+        return node;
+    } catch(std::bad_alloc &) {
+
+        if(run_on_bad_alloc && !is_retrying) {
+            debug_out("retrying on bad alloc");
+            tracker.reset();
+            is_retrying = true;
+            collect();
+            return create_object<T>(std::forward<Args>(args)...);
+        } else {
+            throw;
+        }
+    }
+}
+
+
+template<typename T>
+T *allocate(std::size_t n, bool retry) {
+    std::size_t new_memory_used = memory_used + sizeof(T) * n + 8;
+    
+    if(new_memory_used > memory_limit) {
+        debug_out("allocator: " + std::to_string(new_memory_used) 
+                + " will exceed memory limit " + std::to_string(memory_limit));
+        if(run_on_bad_alloc && retry) {
+            debug_out("allocator: retrying");
+            collect();
+            return allocate<T>(n, false);
+        } else {
+            throw memory_limit_exceeded();
+        }
+    }
+
+    try {
+        T *p = std::allocator<T>().allocate(n); 
+        memory_used = new_memory_used;
+        return p;
+    } catch(std::bad_alloc &) {
+        if(run_on_bad_alloc && retry) {
+            debug_out("allocator: retrying on bad alloc");
+            collect();
+            return allocate<T>(n, false);
+        } else {
+            throw;
+        }
+    }
+}
 
 
 }  // namespace detail
