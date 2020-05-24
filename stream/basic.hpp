@@ -51,12 +51,12 @@ static stream_term as_vector([](auto &prev_op) {
     return result;
 });
 
-/*
+
 template<typename T>
-stream_op as([](auto &prev_op) {
+static stream_term as([](auto &prev_op) {
     return T(prev_op.begin(), prev_op.end());
 });
-*/
+
 
 } // namespace stream
 

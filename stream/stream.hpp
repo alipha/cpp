@@ -15,6 +15,22 @@ namespace stream {
 namespace detail {
 
 
+template<typename Func, typename Tuple, typename = std::void_t<>>
+constexpr bool can_apply_tuple = false;
+
+template<typename Func, typename... Args>
+constexpr bool can_apply_tuple<Func, std::tuple<Args...>, 
+          std::void_t<decltype(std::declval<Func>()(std::declval<Args&>()...))>> = true;
+
+/*
+template<typename Func, typename Src, typename Tuple, typename = std::void_t<>>
+constexpr bool can_apply_op_tuple = false;
+
+template<typename Func, typename Src, typename... Args>
+constexpr bool can_apply_op_tuple<Func, Src, std::tuple<Args...>, 
+          std::void_t<decltype(std::declval<Func>()(std::declval<Src&>(), std::declval<Args&>()...))>> = true;
+*/
+
 template <typename... Args>
 auto make_ref_tuple_from_args(Args&... args) { return std::tuple<Args&...>(args...); }
 
@@ -73,9 +89,64 @@ auto call_stream_op_run(Op &op, Src &src, std::tuple<Params&...> params) {
 
 
 
+template<typename Pipe, typename Gen = char, typename ValueType = decltype(std::declval<Pipe>().next())>
+struct iterator {
+    iterator() : gen(), pipe(nullptr), value() {}
+    explicit iterator(Pipe *p) : gen(), pipe(p), value(pipe->next()) {}
+    explicit iterator(Gen &&g) : gen(std::move(g)), pipe(&*gen), value(pipe->next()) {}
+
+    iterator &operator++() { value = pipe->next(); return *this; }
+
+    iterator operator++(int) {
+        iterator it = *this;
+        value = pipe->next();
+        return it;
+    }
+
+    typename ValueType::value_type &operator*() { return *value; }
+
+    std::optional<Gen> gen;
+    Pipe *pipe;
+    ValueType value;
+};
+
+
+template<typename Pipe, typename Gen, typename InitFunc, typename Func, typename = std::void_t<>>
+struct iterator_type { using type = void; };
+
+template<typename Pipe, typename Gen, typename InitFunc, typename Func>
+struct iterator_type<Pipe, Gen, InitFunc, Func, 
+        std::enable_if_t<can_apply_tuple<Func, decltype(std::declval<InitFunc>()())>>> {
+    using type = iterator<Pipe, Gen>; 
+};
+
+/*
+template<typename Pipe, typename Gen, typename Src, typename InitFunc, typename Func, typename = std::void_t<>>
+struct iterator_op_type { using type = void; };
+
+template<typename Pipe, typename Gen, typename InitFunc, typename Func>
+struct iterator_op_type<Pipe, Gen, InitFunc, Func, 
+        std::enable_if_t<can_apply_tuple<Func, decltype(std::declval<InitFunc>()())>>> {
+    using type = iterator<Pipe, Gen>; 
+};
+*/
+
+
+template<typename Pipe, typename Gen, typename ValueType>
+bool operator==(const iterator<Pipe, Gen, ValueType> &left, const iterator<Pipe, Gen, ValueType> &right) {
+    return left.value.has_value() == right.value.has_value();
+}
+
+template<typename Pipe, typename Gen, typename ValueType>
+bool operator!=(const iterator<Pipe, Gen, ValueType> &left, const iterator<Pipe, Gen, ValueType> &right) {
+    return !(left == right);
+}
+
+
+
 template<typename Src, typename Params = decltype(std::declval<Src>().init())>
 struct gen {
-    gen(Src s) : src(std::move(s)), params(src.init()) {}
+    explicit gen(Src s) : src(std::move(s)), params(src.init()) {}
 
     auto next() { return call_stream_gen_run(src, make_ref_tuple(params)); }
 
@@ -97,9 +168,32 @@ struct pipe {
     Dest dest;
     Params params;
     
+    using iterator = detail::iterator<pipe>;
     using result_opt_type = decltype(std::declval<pipe>().next());
     using result_type = typename result_opt_type::value_type;
+    
+    iterator begin() { return iterator(this); }
+    iterator end() { return iterator(); }
 };
+
+
+
+template<typename Func, typename InitFunc>
+class stream_gen_base {
+public:
+    stream_gen_base(Func &&f) : func(std::move(f)) {}
+    stream_gen_base(Func &&f, InitFunc &&i) : func(std::move(f)), init_func(std::move(i)) {}
+
+    template<typename... Args>
+    auto run(Args&... args) { return func(args...); }
+
+    auto init() { return init_func(); }
+
+protected:
+    Func func;
+    InitFunc init_func;
+};
+
 
 
 struct default_init {
@@ -118,33 +212,31 @@ struct default_op_init {
 
 
 
-template<typename T> struct src_type { using type = T; };
-
-
 template<typename Func, typename InitFunc = detail::default_init>
-class stream_gen {
+class stream_gen : public detail::stream_gen_base<Func, InitFunc> {
 public:
-    stream_gen(Func f) : func(std::move(f)) {}
-    stream_gen(Func f, InitFunc i) : func(std::move(f)), init_func(std::move(i)) {}
+    stream_gen(Func f) : detail::stream_gen_base<Func, InitFunc>(std::move(f)) {}
+    stream_gen(Func f, InitFunc i) : detail::stream_gen_base<Func, InitFunc>(std::move(f), std::move(i)) {}
 
     stream_gen &operator()() { return *this; }
 
     template<typename... Args>
     auto operator()(Args&&... args) {   
-        auto init = [i = init_func, a = std::make_tuple(std::forward<Args>(args)...)](auto&&... more_args) {
+        auto init = [i = this->init_func, a = std::make_tuple(std::forward<Args>(args)...)](auto&&... more_args) {
             return detail::apply_first(std::move(i), std::move(a), std::forward<decltype(more_args)>(more_args)...);
         };
-        return stream_gen<Func, decltype(init)>(func, std::move(init));
+        return stream_gen<Func, decltype(init)>(this->func, std::move(init));
      }
 
-    template<typename... Args>
-    auto run(Args&... args) { return func(args...); }
+    using iterator = typename detail::iterator_type<
+                                detail::gen<detail::stream_gen_base<Func, InitFunc>>, 
+                                detail::gen<detail::stream_gen_base<Func, InitFunc>>,
+                                InitFunc,
+                                Func
+                            >::type;
 
-    auto init() { return init_func(); }
-
-private:
-    Func func;
-    InitFunc init_func;
+    auto begin() { return iterator(detail::gen<detail::stream_gen_base<Func, InitFunc>>(*this)); }
+    auto end() { return iterator(); }
 };
 
 
@@ -186,7 +278,7 @@ public:
 };
 
 
-  
+/*  
 static stream_gen container([](auto &cont, auto &current) {
         using std::end;
         if(current == end(cont))
@@ -208,7 +300,7 @@ template<typename Container, typename Func, typename InitFunc>
 auto operator|(Container &&c, stream_op<Func, InitFunc> op) {
     return detail::pipe(detail::gen(container(std::forward<Container>(c))), std::move(op));
 }
-
+*/
 template<typename Func, typename InitFunc, typename Func2, typename InitFunc2>
 auto operator|(stream_gen<Func, InitFunc> g, stream_op<Func2, InitFunc2> op) {
     return detail::pipe(detail::gen(std::move(g)), std::move(op));
@@ -219,12 +311,12 @@ auto operator|(detail::pipe<Src, Dest, Params> p, stream_op<Func, InitFunc> op) 
     return detail::pipe(std::move(p), std::move(op));
 }
 
-
+/*
 template<typename Container, typename Func, typename InitFunc>
 auto operator|(Container &&c, stream_term<Func, InitFunc> op) {
     return detail::pipe(detail::gen(container(std::forward<Container>(c))), std::move(op)).next();
 }
-
+*/
 template<typename Func, typename InitFunc, typename Func2, typename InitFunc2>
 auto operator|(stream_gen<Func, InitFunc> g, stream_term<Func2, InitFunc2> op) {
     return detail::pipe(detail::gen(std::move(g)), std::move(op)).next();
@@ -237,5 +329,17 @@ auto operator|(detail::pipe<Src, Dest, Params> p, stream_term<Func, InitFunc> op
 
 
 } // namespace stream
+
+
+namespace std {
+    template<typename Pipe, typename Gen, typename ValueType>
+    struct iterator_traits<stream::detail::iterator<Pipe, Gen, ValueType>> {
+        using difference_type = std::size_t;
+        using value_type = typename ValueType::value_type;
+        using reference = value_type&;
+        using pointer = value_type*;
+        using iterator_category = std::input_iterator_tag;
+    };
+}
 
 #endif
