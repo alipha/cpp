@@ -1,0 +1,43 @@
+testing 42
+has value: 42
+has value (bool check)
+value_or(2.5): 42
+value_or_get: 42
+value_or_throw (const): 42
+value_or_throw: 42
+value_or_throw<> (const): 42
+value_or_throw<>: 42
+perform value (const): 42
+perform value
+inside map: 200
+r2: 66.6667
+inside map (value): 200
+r3: 0.5
+before value: 200
+updated value: 3
+before error: caught: result does not contain an error
+testing abc
+has error: 1
+value_or(2.5): 2.5
+inside value_or_get
+value_or_get: 1
+value_or_throw (const): caught: 1
+value_or_throw: caught: 1
+value_or_throw<> (const): caught: thrown
+value_or_throw<>: caught: thrown2
+perform error (const): 1
+perform error
+r2: -999
+inside map (error): 1
+r3: -999
+before value: caught: result does not contain a value
+before error: 1
+updated error: 1
+AAAAA: AAAAA
+foo: foo
+test: test
+test2: test2
+hey: hey
+hello: hello
+caught: hello
+BBBbar: BBBbar
