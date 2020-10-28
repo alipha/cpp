@@ -1,6 +1,7 @@
 #ifndef LIPH_FUNCTION_TRAITS_HPP
 #define LIPH_FUNCTION_TRAITS_HPP
 
+#include <cstddef>
 #include <tuple>
 #include <type_traits>
 
@@ -100,6 +101,9 @@ using function_class_type = typename function_traits<Func>::class_type;
 
 template<typename Func>
 using function_argument_tuple = typename function_traits<Func>::argument_tuple;
+
+template<std::size_t N, typename Func>
+using function_argument_n = std::tuple_element_t<N, function_argument_tuple<Func>>;
 
 template<typename Func>
 constexpr bool is_functor = function_traits<Func>::is_functor;

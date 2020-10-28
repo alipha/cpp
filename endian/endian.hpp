@@ -1,4 +1,3 @@
-// MIT License
 #ifndef LIPH_ENDIAN_HPP
 #define LIPH_ENDIAN_HPP
 
