@@ -143,28 +143,28 @@ public:
     typename call_state_t::return_t operator()(Args&&... args) {
         std::tuple<Args&&...> arg_refs{std::forward<Args>(args)...};
         
-        auto it = (this->*new_calls).find(arg_refs);
+        auto it = new_calls.find(arg_refs);
 
-        bool in_new = (it != (this->*new_calls).end());
+        bool in_new = (it != new_calls.end());
         if(!in_new)
-            it = (this->*old_calls).find(arg_refs);
+            it = old_calls.find(arg_refs);
 
-        if(!in_new && it == (this->*old_calls).end()) {  // if not in either
+        if(!in_new && it == old_calls.end()) {  // if not in either
             call_state_t call(f(std::forward<Args>(args)...), std::forward<Args>(args)...);
 
             if(fill_new())
-                it = (this->*new_calls).insert(std::move(call)).first;
+                it = new_calls.insert(std::move(call)).first;
             else
-                it = (this->*old_calls).insert(std::move(call)).first;
+                it = old_calls.insert(std::move(call)).first;
         } else if(!in_new && fill_new()) {
             // if call needs to be moved from old to new
-            call_state_t call = std::move((this->*old_calls).extract(it).value());
-            it = (this->*new_calls).insert(std::move(call)).first;
+            call_state_t call = std::move(old_calls.extract(it).value());
+            it = new_calls.insert(std::move(call)).first;
         } // if in new, do nothing. (or in old and doesn't need to be moved) just return it
             
         auto ret = it->get_return_value();
 
-        if((this->*new_calls).size() > max_size)
+        if(new_calls.size() > max_size)
             expire();
 
         return ret;
@@ -173,32 +173,30 @@ public:
     void set_max_size(std::size_t max) {
         max_size = max / 2;
 
-        if(calls1.size() + calls2.size() > max)
+        if(new_calls.size() + old_calls.size() > max)
             expire();
     }
 
     void expire_all() {
-        calls1.clear();
-        calls2.clear();
+        new_calls.clear();
+        old_calls.clear();
     }
    
     // only leave the most recent calls 
     void expire() {
-        (this->*old_calls).clear();
+        old_calls.clear();
         std::swap(old_calls, new_calls);
     }
 
 private:
     bool fill_new() const {
-        return !(this->*new_calls).empty() || (this->*old_calls).size() >= max_size;
+        return !new_calls.empty() || old_calls.size() >= max_size;
     }
 
     std::size_t max_size = 25;
     Functor f;
-    call_set calls1;
-    call_set calls2;
-    call_set cached_function::*new_calls = &cached_function::calls1;
-    call_set cached_function::*old_calls = &cached_function::calls2;
+    call_set new_calls;
+    call_set old_calls;
 };
 
 #endif
