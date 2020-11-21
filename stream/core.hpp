@@ -82,6 +82,16 @@ auto call_stream_op_run(Op &op, Src &src, std::tuple<Params&...> params) {
 }
 
 
+template<typename Op, typename... Params>
+auto call_stream_post_init(Op &op, std::tuple<Params&...> &&params) {
+    using Class = std::remove_reference_t<Op>;
+
+    return apply_last(static_cast<void(Class::*)(Params&...)>(&Class::template post_init<Params&...>), 
+            std::move(params),
+            op);
+}
+
+
 
 template<typename Pipe, typename Gen = char, typename ValueType = decltype(std::declval<Pipe>().next())>
 struct iterator {
@@ -119,7 +129,9 @@ bool operator!=(const iterator<Pipe, Gen, ValueType> &left, const iterator<Pipe,
 
 template<typename Src, typename Params = decltype(std::declval<Src>().init())>
 struct gen {
-    explicit gen(Src s) : src(std::move(s)), params(src.init()) {}
+    explicit gen(Src s) : src(std::move(s)), params(src.init()) {
+        call_stream_post_init(src, make_ref_tuple(params));
+    }
 
     auto next() { return call_stream_gen_run(src, make_ref_tuple(params)); }
 
@@ -137,7 +149,7 @@ struct gen {
 
 template<typename Src, typename Dest, typename Params = decltype(std::declval<Dest>().template init(std::declval<Src&>()))>
 struct pipe {
-    pipe(Src s, Dest d) : src(std::move(s)), dest(std::move(d)), params(dest.template init(src)) {}
+    pipe(Src s, Dest d) : src(std::move(s)), dest(std::move(d)), params(dest.template init(src)) { call_stream_post_init(dest, make_ref_tuple(params)); }
 /*
     pipe(const pipe &) = delete;
     pipe &operator=(const pipe &) = delete;
@@ -161,20 +173,25 @@ struct pipe {
 
 
 
-template<typename Func, typename InitFunc>
+template<typename Func, typename InitFunc, typename PostInitFunc>
 class stream_gen_base {
 public:
     stream_gen_base(Func &&f) : func(std::move(f)) {}
     stream_gen_base(Func &&f, InitFunc &&i) : func(std::move(f)), init_func(std::move(i)) {}
+    stream_gen_base(Func &&f, InitFunc &&i, PostInitFunc &&p) : func(std::move(f)), init_func(std::move(i)), post_init_func(std::move(p)) {}
 
     template<typename... Args>
     auto run(Args&... args) { return func(args...); }
 
     auto init() { return init_func(); }
 
+    template<typename... Args>
+    void post_init(Args&... args) { post_init_func(args...); }
+
 protected:
     Func func;
     InitFunc init_func;
+    PostInitFunc post_init_func;
 };
 
 
@@ -202,15 +219,22 @@ struct default_op_init {
 };
 
 
+struct default_post_init {
+    template<typename... Args>
+    void operator()(Args&&...) {}
+};
+
+
 } // namespace detail
 
 
 
-template<typename Func, typename InitFunc = detail::default_init>
-class stream_gen : public detail::stream_gen_base<Func, InitFunc> {
+template<typename Func, typename InitFunc = detail::default_init, typename PostInitFunc = detail::default_post_init>
+class stream_gen : public detail::stream_gen_base<Func, InitFunc, PostInitFunc> {
 public:
-    stream_gen(Func f) : detail::stream_gen_base<Func, InitFunc>(std::move(f)) {}
-    stream_gen(Func f, InitFunc i) : detail::stream_gen_base<Func, InitFunc>(std::move(f), std::move(i)) {}
+    stream_gen(Func f) : detail::stream_gen_base<Func, InitFunc, PostInitFunc>(std::move(f)) {}
+    stream_gen(Func f, InitFunc i) : detail::stream_gen_base<Func, InitFunc, PostInitFunc>(std::move(f), std::move(i)) {}
+    stream_gen(Func f, InitFunc i, PostInitFunc p) : detail::stream_gen_base<Func, InitFunc, PostInitFunc>(std::move(f), std::move(i), std::move(p)) {}
 
     stream_gen &operator()() { return *this; }
 
@@ -219,26 +243,27 @@ public:
         auto init = [i = this->init_func, a = std::tuple<Args...>(std::forward<Args>(args)...)](auto&&... more_args) {
             return detail::apply_first(std::move(i), std::move(a), std::forward<decltype(more_args)>(more_args)...);
         };
-        return stream_gen<Func, decltype(init)>(this->func, std::move(init));
+        return stream_gen<Func, decltype(init), PostInitFunc>(this->func, std::move(init), this->post_init_func);
      }
 
     using iterator = typename detail::iterator_type<
-                                detail::stream_gen_base<Func, InitFunc>, 
+                                detail::stream_gen_base<Func, InitFunc, PostInitFunc>, 
                                 InitFunc,
                                 Func
                             >::type;
 
-    auto begin() { return iterator(detail::gen<detail::stream_gen_base<Func, InitFunc>>(*this)); }
+    auto begin() { return iterator(detail::gen<detail::stream_gen_base<Func, InitFunc, PostInitFunc>>(*this)); }
     auto end() { return iterator(); }
 };
 
 
 
-template<typename Func, typename InitFunc = detail::default_op_init>
+template<typename Func, typename InitFunc = detail::default_op_init, typename PostInitFunc = detail::default_post_init>
 class stream_op {
 public:
     stream_op(Func f) : func(std::move(f)) {}
     stream_op(Func f, InitFunc i) : func(std::move(f)), init_func(std::move(i)) {}
+    stream_op(Func f, InitFunc i, PostInitFunc p) : func(std::move(f)), init_func(std::move(i)), post_init_func(std::move(p)) {}
 
     stream_op &operator()() { return *this; }
 
@@ -247,7 +272,7 @@ public:
         auto init = [i = init_func, a = std::tuple<Args...>(std::forward<Args>(args)...)](auto &prev_op, auto&&... more_args) {
             return apply_first(std::move(i), std::tuple_cat(std::tuple<decltype(prev_op)&>(prev_op), std::move(a)), std::forward<decltype(more_args)>(more_args)...);
         };
-        return stream_op<Func, decltype(init)>(func, std::move(init));
+        return stream_op<Func, decltype(init), PostInitFunc>(func, std::move(init), post_init_func);
      }
 
     template<typename... Args>
@@ -256,18 +281,23 @@ public:
     template<typename Src>
     auto init(Src &src) { return init_func(src); }
 
+    template<typename... Args>
+    void post_init(Args&... args) { post_init_func(args...); } 
+
 private:
     Func func;
     InitFunc init_func;
+    PostInitFunc post_init_func;
 };
 
 
 
-template<typename Func, typename InitFunc = detail::default_op_init>
-class stream_term : public stream_op<Func, InitFunc> {
+template<typename Func, typename InitFunc = detail::default_op_init, typename PostInitFunc = detail::default_post_init>
+class stream_term : public stream_op<Func, InitFunc, PostInitFunc> {
 public:
-    stream_term(Func f) : stream_op<Func, InitFunc>(std::move(f)) {}
-    stream_term(Func f, InitFunc i) : stream_op<Func, InitFunc>(std::move(f), std::move(i)) {} 
+    stream_term(Func f) : stream_op<Func, InitFunc, PostInitFunc>(std::move(f)) {}
+    stream_term(Func f, InitFunc i) : stream_op<Func, InitFunc, PostInitFunc>(std::move(f), std::move(i)) {} 
+    stream_term(Func f, InitFunc i, PostInitFunc p) : stream_op<Func, InitFunc, PostInitFunc>(std::move(f), std::move(i), std::move(p)) {} 
 };
 
 
@@ -283,8 +313,6 @@ namespace detail {
 struct container_gen {
     template<typename Container, typename It>
     auto operator()(Container &cont, std::optional<It> &current) const {
-        if(!current)
-            current = std::begin(cont);
         if(*current == std::end(cont))
             return std::optional<std::decay_t<decltype(**current)>>();
         else
@@ -310,43 +338,49 @@ struct container_init {
     template<typename T>
     std::tuple<> operator()(std::optional<T>) const { return {}; }
 };
+struct container_post_init {
+    template<typename Container, typename It>
+    auto operator()(Container &cont, std::optional<It> &current) const {
+        current = std::begin(cont);
+    }
+};
 
 
 } // namespace detail
 
 
-inline stream_gen container{detail::container_gen{}, detail::container_init{}};
+inline stream_gen container{detail::container_gen{}, detail::container_init{}, detail::container_post_init{}};
 
 
 
-template<typename Container, typename Func, typename InitFunc>
-auto operator|(Container &&c, stream_op<Func, InitFunc> op) {
+template<typename Container, typename... Args>
+auto operator|(Container &&c, stream_op<Args...> op) {
     return detail::pipe(detail::gen(container(std::forward<Container>(c))), std::move(op));
 }
 
-template<typename Func, typename InitFunc, typename Func2, typename InitFunc2>
-auto operator|(stream_gen<Func, InitFunc> g, stream_op<Func2, InitFunc2> op) {
+template<typename Func, typename InitFunc, typename PostInitFunc, typename Func2, typename InitFunc2, typename PostInitFunc2>
+auto operator|(stream_gen<Func, InitFunc, PostInitFunc> g, stream_op<Func2, InitFunc2, PostInitFunc2> op) {
     return detail::pipe(detail::gen(std::move(g)), std::move(op));
 }
 
-template<typename Src, typename Dest, typename Params, typename Func, typename InitFunc>
-auto operator|(detail::pipe<Src, Dest, Params> p, stream_op<Func, InitFunc> op) {
+template<typename Src, typename Dest, typename Params, typename... Args>
+auto operator|(detail::pipe<Src, Dest, Params> p, stream_op<Args...> op) {
     return detail::pipe(std::move(p), std::move(op));
 }
 
 
-template<typename Container, typename Func, typename InitFunc>
-auto operator|(Container &&c, stream_term<Func, InitFunc> op) {
+template<typename Container, typename... Args>
+auto operator|(Container &&c, stream_term<Args...> op) {
     return detail::pipe(detail::gen(container(std::forward<Container>(c))), std::move(op)).next();
 }
 
-template<typename Func, typename InitFunc, typename Func2, typename InitFunc2>
-auto operator|(stream_gen<Func, InitFunc> g, stream_term<Func2, InitFunc2> op) {
+template<typename Func, typename InitFunc, typename PostInitFunc, typename Func2, typename InitFunc2, typename PostInitFunc2>
+auto operator|(stream_gen<Func, InitFunc, PostInitFunc> g, stream_term<Func2, InitFunc2, PostInitFunc2> op) {
     return detail::pipe(detail::gen(std::move(g)), std::move(op)).next();
 }
 
-template<typename Src, typename Dest, typename Params, typename Func, typename InitFunc>
-auto operator|(detail::pipe<Src, Dest, Params> p, stream_term<Func, InitFunc> op) {
+template<typename Src, typename Dest, typename Params, typename... Args>
+auto operator|(detail::pipe<Src, Dest, Params> p, stream_term<Args...> op) {
     return detail::pipe(std::move(p), std::move(op)).next();
 }
 

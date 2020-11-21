@@ -85,8 +85,8 @@ public:
     streamer(detail::pipe<Src, Dest, Params> p) 
         : src([s = std::move(p)]() mutable { return s.next(); }) {}
 
-    template<typename Func, typename InitFunc>
-    streamer(stream_gen<Func, InitFunc> g)
+    template<typename... Args>
+    streamer(stream_gen<Args...> g)
         : src([s = detail::gen(std::move(g))]() mutable { return s.next(); }) {}
 
     template<typename U>
@@ -124,19 +124,19 @@ streamer(Container &&c) -> streamer<std::remove_reference_t<decltype(*std::begin
 template<typename Src, typename Dest, typename Params>
 streamer(detail::pipe<Src, Dest, Params>) -> streamer<typename detail::pipe<Src, Dest, Params>::value_type>; 
 
-template<typename Func, typename InitFunc>
-streamer(stream_gen<Func, InitFunc> g) -> streamer<std::remove_reference_t<decltype(*g.begin())>>;
+template<typename... Args>
+streamer(stream_gen<Args...> g) -> streamer<std::remove_reference_t<decltype(*g.begin())>>;
 
 
 
-template<typename T, typename Func, typename InitFunc>
-auto operator|(streamer<T> &&s, stream_op<Func, InitFunc> op) {
+template<typename T, typename... Args>
+auto operator|(streamer<T> &&s, stream_op<Args...> op) {
     return detail::pipe(std::move(s), std::move(op));
 }
 
-template<typename T, typename Func, typename InitFunc>
-auto operator|(streamer<T> &&s, stream_term<Func, InitFunc> op) {
-    return detail::pipe(std::move(s), std::move(op));
+template<typename T, typename... Args>
+auto operator|(streamer<T> &&s, stream_term<Args...> op) {
+    return detail::pipe(std::move(s), std::move(op)).next();
 }
 
 
