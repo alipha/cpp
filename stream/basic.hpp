@@ -8,57 +8,102 @@
 namespace stream {
 
 
-inline stream_gen range([](auto &start, auto &end) {
-    if(start != end)
-        return std::optional(start++);
-    else
-        return std::optional<std::decay_t<decltype(start)>>();
-});
-
-  
-inline stream_op mapping([](auto &prev_op, auto &f) {
-    if(auto value = prev_op.next())
-        return std::optional(f(*value));
-    else
-        return decltype(prev_op.next())();
-});
+namespace detail {
 
 
-inline stream_op filter([](auto &prev_op, auto &f) {
-    decltype(prev_op.next()) value;
-    while((value = prev_op.next()) && !f(*value)) {}
-    return value;
-});
+struct range_gen {
+    template<typename T, typename U>
+    std::optional<T> operator()(T &start, U &end) const {
+        if(start != end)
+            return start++;
+        else
+            return {};
+    }
+};
 
 
+struct mapping_op {
+    template<typename Op, typename Func>
+    auto operator()(Op &prev_op, Func &f) const {
+        using T = std::decay_t<decltype(f(std::move(*prev_op.next())))>;
 
-inline stream_op adj_unique([](auto &prev_op, auto &prev_value) {
-        decltype(prev_op.next()) value;
+        if(auto value = prev_op.next())
+            return std::optional<T>(f(std::move(*value)));
+        else
+            return std::optional<T>();
+    }
+};
+
+
+struct filter_op {
+    template<typename Op, typename Func>
+    auto operator()(Op &prev_op, Func &f) const {
+        typename Op::value_opt_type value;
+        while((value = prev_op.next()) && !f(*value)) {}
+        return value;
+    }
+};
+
+
+// TODO: move to extra.hpp
+struct adj_unique_op {
+    template<typename Op>
+    auto operator()(Op &prev_op, typename Op::value_opt_type &prev_value) const {
+        typename Op::value_opt_type value;
         while((value = prev_op.next()) && value == prev_value) {}
         prev_value = value;
         return value;
-    },
-    [](auto &prev_op) {
-        return std::tuple<decltype(prev_op.next())>();
     }
-);
+};
+struct adj_unique_init {
+    template<typename Op>
+    std::tuple<typename Op::value_opt_type> operator()(Op &) const {
+        return {};
+    }
+};
 
 
-inline stream_term as_vector([](auto &prev_op) {
-    std::vector<std::remove_reference_t<decltype(*prev_op.next())>> result;
-    while(auto value = prev_op.next())
-        result.push_back(*value);
-    return result;
-});
+struct as_vector_term {
+    template<typename Op>
+    auto operator()(Op &prev_op) const {
+        std::vector<typename Op::value_type> result;
+        while(auto value = prev_op.next())
+            result.push_back(std::move(*value));
+        return result;
+    }
+};
 
 
 template<typename T>
-inline stream_term as([](auto &prev_op) {
-    using std::begin;
-    using std::end;
-    return T(begin(prev_op), end(prev_op));
-});
+struct as_term {
+    template<typename Op>
+    T operator()(Op &prev_op) const {
+        return T(std::begin(prev_op), std::end(prev_op));
+    }
+};
 
+
+struct first_term {
+    template<typename Op>
+    auto operator()(Op &prev_op) const { return prev_op.next(); }
+};
+
+
+
+
+} // namespace detail
+
+
+inline stream_gen range{detail::range_gen{}};
+inline stream_op mapping{detail::mapping_op{}};
+inline stream_op filter{detail::filter_op{}};
+inline stream_op adj_unique{detail::adj_unique_op{}, detail::adj_unique_init{}};  // TODO: move to extra.hpp
+inline stream_term as_vector{detail::as_vector_term{}};
+
+template<typename T>
+stream_term as{detail::as_term<T>{}};
+
+inline stream_term first{detail::first_term{}};
 
 } // namespace stream
 

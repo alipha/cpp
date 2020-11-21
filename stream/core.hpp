@@ -279,35 +279,43 @@ auto smart_make_tuple(Args&&... args) { return std::tuple<Args...>(std::forward<
 
 namespace detail {
 
-struct container_op {
+
+struct container_gen {
     template<typename Container, typename It>
     auto operator()(Container &cont, std::optional<It> &current) const {
-        using std::begin;
-        using std::end;
         if(!current)
-            current = begin(cont);
-        if(*current == end(cont))
+            current = std::begin(cont);
+        if(*current == std::end(cont))
             return std::optional<std::decay_t<decltype(**current)>>();
         else
             return std::optional(*(*current)++);
 
     }
-};
 
-struct container_init {
-    template<typename Container>
-    auto operator()(Container &&cont) const { 
-        using std::begin;
-        return smart_make_tuple(
-            std::forward<Container>(cont), 
-            std::optional<decltype(begin(std::forward<Container>(cont)))>()); 
+    template<typename T>
+    std::optional<T> operator()(std::optional<T> &opt) const {
+        auto ret = opt;
+        opt.reset();
+        return ret;
     }
 };
+struct container_init {
+    template<typename Container>
+    auto operator()(Container &&cont) const {
+        return smart_make_tuple(
+            std::forward<Container>(cont), 
+            std::optional<decltype(std::begin(std::forward<Container>(cont)))>()); 
+    }
+
+    template<typename T>
+    std::tuple<> operator()(std::optional<T>) const { return {}; }
+};
+
 
 } // namespace detail
 
 
-inline stream_gen container{detail::container_op(), detail::container_init()};
+inline stream_gen container{detail::container_gen{}, detail::container_init{}};
 
 
 

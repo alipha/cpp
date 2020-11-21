@@ -42,13 +42,6 @@ bool operator!=(const stream_iterator<T> &left, const stream_iterator<T> &right)
 }
 
 
-template<typename Container>
-auto get_begin(Container &&c) {
-    using std::begin;
-    return begin(c);
-}
-
-
 } // namespace detail
 
 
@@ -61,14 +54,12 @@ inline stream_gen make_stream(
 			else
 				return std::optional(*first++);
 		}
-    & detail::container_op(),
+    & detail::container_gen(),
 
 	overload
 	& detail::container_init()
     & [](auto &cont) {
-			using std::begin;
-			using std::end;
-			return std::make_tuple(begin(cont), end(cont));
+			return std::make_tuple(std::begin(cont), std::end(cont));
 		}
 	& [](auto &&first, auto &&last) {
 			return std::make_tuple(std::forward<decltype(first)>(first), std::forward<decltype(last)>(last));
@@ -128,7 +119,7 @@ template<typename U, typename V>
 streamer(U&& u, V&&) -> streamer<std::remove_reference_t<decltype(*u)>>;
 
 template<typename Container>
-streamer(Container &&c) -> streamer<std::remove_reference_t<decltype(*detail::get_begin(std::forward<Container>(c)))>>;
+streamer(Container &&c) -> streamer<std::remove_reference_t<decltype(*std::begin(std::forward<Container>(c)))>>;
 
 template<typename Src, typename Dest, typename Params>
 streamer(detail::pipe<Src, Dest, Params>) -> streamer<typename detail::pipe<Src, Dest, Params>::value_type>; 
