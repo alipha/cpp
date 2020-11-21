@@ -13,18 +13,18 @@ namespace detail {
 
 template<typename T>
 struct stream_iterator {
-    stream_iterator() : src(nullptr), value() {}
-    stream_iterator(std::function<std::optional<T>()> *s) : src(&s), value((*src)()) {}
+    constexpr stream_iterator() : src(nullptr), value() {}
+    constexpr stream_iterator(std::function<std::optional<T>()> *s) : src(&s), value((*src)()) {}
 
-    stream_iterator &operator++() { value = (*src)(); return *this; }
+    constexpr stream_iterator &operator++() { value = (*src)(); return *this; }
 
-    stream_iterator operator++(int) {
+    constexpr stream_iterator operator++(int) {
         iterator it = *this;
         value = (*src)();
         return it;
     }
 
-    T &operator*() { return *value; }
+    constexpr T &operator*() { return *value; }
 
     std::function<std::optional<T>()> *src;    
     std::optional<T> value;
@@ -48,7 +48,7 @@ bool operator!=(const stream_iterator<T> &left, const stream_iterator<T> &right)
 
 inline stream_gen make_stream(
 	overload
-	& [](auto &first, auto &last) {
+	& [](auto &first, auto &last) constexpr {
 			if(first == last)
 				return std::optional<std::decay_t<decltype(*first)>>();
 			else
@@ -58,13 +58,13 @@ inline stream_gen make_stream(
 
 	overload
 	& detail::container_init()
-    & [](auto &cont) {
+    & [](auto &cont) constexpr {
 			return std::make_tuple(std::begin(cont), std::end(cont));
 		}
-	& [](auto &&first, auto &&last) {
+	& [](auto &&first, auto &&last) constexpr {
 			return std::make_tuple(std::forward<decltype(first)>(first), std::forward<decltype(last)>(last));
 		}
-	& [](auto *p, std::size_t len) {
+	& [](auto *p, std::size_t len) constexpr {
 			return std::make_tuple(p, p + len);
 		}
 );
@@ -75,40 +75,40 @@ template<typename T>
 class streamer {
 public:
     template<typename U, typename V>
-    streamer(U &&u, V &&v) : src([s = make_stream(std::forward<U>(u), std::forward<V>(v))]() mutable { return s.next(); }) {}
+    constexpr streamer(U &&u, V &&v) : src([s = make_stream(std::forward<U>(u), std::forward<V>(v))]() mutable { return s.next(); }) {}
 
     template<typename Container>
-    streamer(Container &&c)
+    constexpr streamer(Container &&c)
         : src([s = detail::gen(container(std::forward<Container>(c)))]() mutable { return s.next(); }) {}
 
     template<typename Src, typename Dest, typename Params>
-    streamer(detail::pipe<Src, Dest, Params> p) 
+    constexpr streamer(detail::pipe<Src, Dest, Params> p) 
         : src([s = std::move(p)]() mutable { return s.next(); }) {}
 
     template<typename... Args>
-    streamer(stream_gen<Args...> g)
+    constexpr streamer(stream_gen<Args...> g)
         : src([s = detail::gen(std::move(g))]() mutable { return s.next(); }) {}
 
     template<typename U>
-    streamer(streamer<U> &&other)
+    constexpr streamer(streamer<U> &&other)
         : src([s = std::move(other.s)]() mutable { return s(); }) {}
 
 
     streamer(const streamer &) = delete;
     streamer &operator=(const streamer &) = delete;
 
-    streamer(streamer &&) = default;
-    streamer &operator=(streamer &&) = default;
+    constexpr streamer(streamer &&) = default;
+    constexpr streamer &operator=(streamer &&) = default;
 
 
     using iterator = detail::stream_iterator<T>;
     using value_opt_type = std::optional<T>;
     using value_type = T;
     
-    std::optional<T> next() { return src(); }
+    constexpr std::optional<T> next() { return src(); }
 
-    iterator begin() { return iterator(&src); }
-    iterator end() { return iterator(); }
+    constexpr iterator begin() { return iterator(&src); }
+    constexpr iterator end() { return iterator(); }
 
 private:
     std::function<std::optional<T>()> src;
