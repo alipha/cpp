@@ -17,6 +17,7 @@ std::string foo(int) {
 
 int main() {
     std::cout << std::is_same_v<function_class_type<decltype(foo)>, void> << std::endl;
+    std::cout << std::is_same_v<function_argument_n<0, decltype(foo)>, int> << std::endl;
     std::cout << is_member_function<decltype(foo)> << std::endl;
     std::cout << is_member_function<decltype(&bar::const_something)> << std::endl;
     std::cout << is_const_member_function<decltype(foo)> << std::endl;
