@@ -1,0 +1,63 @@
+#include "zip_iterator.hpp"
+
+#include <iostream>
+#include <list>
+#include <string>
+#include <vector>
+
+
+
+int main() {
+    std::list<std::string> us{"test", "foo", "bar", "test2", "test3"};
+	std::vector<int> vs{3, 6, 9};
+	std::vector<double> ws{4.5, 2.5, 3.5};
+
+    // the iterator ranges are of different lengths (5, 3, and 3), so
+    // this will loop only 3 times, to prevent going past the end iterator
+    for(auto [u, v, w] : zip_range(us, vs, ws)) {
+        std::cout << u << v + w << ' ';
+    }
+    std::cout << '\n';
+
+
+    auto range = zip_range(vs, ws);
+
+    std::sort(range.begin(), range.end(), 
+        [](std::tuple<int, double> left, std::tuple<int, double> right) {
+            return std::get<1>(left) < std::get<1>(right);
+        });
+
+    for(auto [v, w] : range) {
+        std::cout << '(' << v << ", " << w << ") ";
+    }
+    std::cout << '\n';
+
+
+    std::sort(range.begin(), range.end());
+
+    for(auto [v, w] : const_zip_range(vs, ws)) {
+        std::cout << '(' << v << ", " << w << ") ";
+    }
+    std::cout << '\n';
+
+
+    zip_iterator it = zip_iterator(us.begin(), vs.begin(), ws.begin() + 1);
+    zip_iterator last = zip_iterator(us.end(), vs.end(), ws.end());
+
+    // the iterator ranges are of different lengths (5, 3, and 2), so `it != last` will become false
+    // as soon as one of the iterator pairs compares equal, which means this will loop only twice
+    for(; it != last; ++it) {
+        auto [u, v, w] = *it;
+        u += 'x';
+        std::cout << u << v + w << ' ';
+    }
+    std::cout << '\n';
+
+
+    for(auto it = range.cbegin(); it < range.cend(); ++it) {
+        auto [v, w] = *it;
+        std::cout << "from end: " << range.cend() - it << "\t v + w = " << v + w << '\n';
+    }
+    std::cout << '\n';
+}
+
