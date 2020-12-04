@@ -1,0 +1,31 @@
+Goals:
+
+No macros
+
+No RTTI
+
+Function calls are dispatched efficiently via lookup tables
+
+Compiler or linker errors will catch missing implementations
+
+Multi-dispatched functions can be added without recompiling all the subclasses
+
+Subclasses can be added without recompiling all other subclasses
+
+
+Features:
+
+Multi-dispatch can be performed with objects from extended from the same superclass or
+    from different superclasses
+
+Multi-dispatch can be performed with any number of arguments, including a single argument, 
+    which is effectively creating a "virtual non-member function"
+
+If argument order does not matter (e.g., collides(Square&, Circle&) has the same implementation
+    as collides(Circle&, Square&) then unordered_multi_dispatch may be used to avoid having to
+    write both overloads
+
+
+Limitations:
+
+subclass_registrar and superclass_registrar must be injected into the class hierarchy

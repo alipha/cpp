@@ -6,31 +6,30 @@
 namespace impl {
    
     bool contains_shape(const circle &outside, const circle &inside) {
+        return distance(outside.x, outside.y, inside.x, inside.y) + inside.radius <= outside.radius;
     }
    
-    bool contains_shape(const circle &outside, const rectangle &inside) {
+    bool contains_shape(const shape &outside, const rectangle &inside) {
+        return outside.contains_point(inside.x1, inside.y1)
+            && outside.contains_point(inside.x1, inside.y2)
+            && outside.contains_point(inside.x2, inside.y1)
+            && outside.contains_point(inside.x2, inside.y2);
+
     }
    
-    bool contains_shape(const circle &outside, const square &inside) {
+    bool contains_shape(const shape &outside, const square &inside) {
+        return outside.contains_point(inside.x1, inside.y1)
+            && outside.contains_point(inside.x1, inside.y1 + inside.width)
+            && outside.contains_point(inside.x1 + inside.width, inside.y1)
+            && outside.contains_point(inside.x1 + inside.width, inside.y1 + inside.width);
     }
    
-    bool contains_shape(const rectangle &outside, const circle &inside) {
-    }
-   
-    bool contains_shape(const rectangle &outside, const rectangle &inside) {
-    }
-   
-    bool contains_shape(const rectangle &outside, const square &inside) {
-    }
-   
-    bool contains_shape(const square &outside, const circle &inside) {
-    }
-   
-    bool contains_shape(const square &outside, const rectangle &inside) {
-    }
-   
-    bool contains_shape(const square &outside, const square &inside) {
-    }
+    bool contains_shape(const shape &outside, const circle &inside) {
+        return outside.contains_point(inside.x - inside.radius, inside.y)
+            && outside.contains_point(inside.x + inside.radius, inside.y)
+            && outside.contains_point(inside.x, inside.y - inside.radius)
+            && outside.contains_point(inside.x, inside.y + inside.radius);
+    }  
 }
 
 
