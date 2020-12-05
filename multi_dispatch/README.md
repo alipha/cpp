@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This is a library an easy and safe to perform Multiple Dispatch (e.g., Double Dispatch) at nearly the same performance as the equivalent Visitor Pattern implementation, 
+This is a library to enable an easy and safe way to perform Multiple Dispatch (e.g., Double Dispatch) at nearly the same performance as the equivalent Visitor Pattern implementation, 
 but without cluttering your classes with all the Visitor Pattern boilerplate. It allows you to separate the dynamically-dispatched functions from the class implementations,
 so that adding new derived classes or dynamically-dispatched functions doesn't require recompilation of all the derived classes.
 
