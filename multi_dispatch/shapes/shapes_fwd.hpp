@@ -3,12 +3,6 @@
 
 #include "../multi_dispatch/subclass_list.hpp"
 
-
-class shape;
-class circle;
-class square;
-class rectangle;
-
-using shapes = subclass_list<shape, std::tuple<circle, square, rectangle>>;
+using shapes = subclass_list<class shape, std::tuple<class circle, class square, class rectangle>>;
 
 #endif
