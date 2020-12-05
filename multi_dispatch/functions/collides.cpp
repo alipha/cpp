@@ -7,11 +7,11 @@
 
 namespace impl {
 
-    bool collides(circle &left, circle &right) {
+    inline bool collides(circle &left, circle &right) {
         return distance(left.x, left.y, right.x, right.y) <= left.radius + right.radius;
     }
 
-    bool collides(circle &left, rectangle &right) {
+    inline bool collides(circle &left, rectangle &right) {
         return right.contains_point(left.x, left.y - left.radius) 
             || right.contains_point(left.x, left.y + left.radius)
             || right.contains_point(left.x - left.radius, left.y)
@@ -22,26 +22,26 @@ namespace impl {
             || left.contains_point(right.x2, right.y2);
     }
 
-    bool collides(circle &left, square &right) {
+    inline bool collides(circle &left, square &right) {
         rectangle r(right.x1, right.y1, right.x1 + right.width, right.y1 + right.width);
         return collides(left, r);
     }
 
-    bool collides(square &left, square &right) {
+    inline bool collides(square &left, square &right) {
         return left.contains_point(right.x1, right.y1)
             || left.contains_point(right.x1, right.y1 + right.width)
             || left.contains_point(right.x1 + right.width, right.y1)
             || left.contains_point(right.x1 + right.width, right.y1 + right.width);
     }
 
-    bool collides(square &left, rectangle &right) {
+    inline bool collides(square &left, rectangle &right) {
         return left.contains_point(right.x1, right.y1)
             || left.contains_point(right.x1, right.y2)
             || left.contains_point(right.x2, right.y1)
             || left.contains_point(right.x2, right.y2);
     }
 
-    bool collides(rectangle &left, rectangle &right) {
+    inline bool collides(rectangle &left, rectangle &right) {
         return left.contains_point(right.x1, right.y1)
             || left.contains_point(right.x1, right.y2)
             || left.contains_point(right.x2, right.y1)

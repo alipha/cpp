@@ -108,15 +108,16 @@ bool contains(const shape &outside, const shape &inside);
 
 // functions/contains.cpp
 // now we can group all the contains implementations together instead of being spread out across various class definitions!
-bool contains_impl(const circle &outside, const circle &inside)       { /* calculation for determining if a circle contains a circle */ }
-bool contains_impl(const circle &outside, const square &inside)       { /* calculation for determining if a circle contains a square */ }
-bool contains_impl(const circle &outside, const rectangle &inside)    { /* calculation for determining if a circle contains a rectangle */ }
-bool contains_impl(const square &outside, const circle &inside)       { /* calculation for determining if a square contains a circle */ }
-bool contains_impl(const square &outside, const square &inside)       { /* calculation for determining if a square contains a square */ }
-bool contains_impl(const square &outside, const rectangle &inside)    { /* calculation for determining if a square contains a rectangle */ }
-bool contains_impl(const rectangle &outside, const circle &inside)    { /* calculation for determining if a rectangle contains a circle */ }
-bool contains_impl(const rectangle &outside, const square &inside)    { /* calculation for determining if a rectangle contains a square */ }
-bool contains_impl(const rectangle &outside, const rectangle &inside) { /* calculation for determining if a rectangle contains a rectangle */ }
+// note that inline helps ensure the compiler optimizes out these functions
+inline bool contains_impl(const circle &outside, const circle &inside)       { /* calculation for determining if a circle contains a circle */ }
+inline bool contains_impl(const circle &outside, const square &inside)       { /* calculation for determining if a circle contains a square */ }
+inline bool contains_impl(const circle &outside, const rectangle &inside)    { /* calculation for determining if a circle contains a rectangle */ }
+inline bool contains_impl(const square &outside, const circle &inside)       { /* calculation for determining if a square contains a circle */ }
+inline bool contains_impl(const square &outside, const square &inside)       { /* calculation for determining if a square contains a square */ }
+inline bool contains_impl(const square &outside, const rectangle &inside)    { /* calculation for determining if a square contains a rectangle */ }
+inline bool contains_impl(const rectangle &outside, const circle &inside)    { /* calculation for determining if a rectangle contains a circle */ }
+inline bool contains_impl(const rectangle &outside, const square &inside)    { /* calculation for determining if a rectangle contains a square */ }
+inline bool contains_impl(const rectangle &outside, const rectangle &inside) { /* calculation for determining if a rectangle contains a rectangle */ }
 
 // note that the Visitor Pattern example would have contained the same number (9) of contains_derived functions, but they 
 // were omitted for brevity
@@ -155,9 +156,20 @@ While using multi_dispatch requires a little boilerplate, the boilerplate is eas
     which is effectively creating a "virtual non-member function"
 
 * If argument order does not matter (e.g., collides(Square&, Circle&) has the same implementation
-    as collides(Circle&, Square&) then unordered_multi_dispatch may be used to avoid having to
+    as collides(Circle&, Square&)) then unordered_multi_dispatch may be used to avoid having to
     write both overloads (TO BE IMPLEMENTED)
 
+## Performance
+
+Individual objects require no additional space cost. They need to be polymorphic, but they are probably already polymorphic. However, if 
+they're not, then storage for a vtable pointer is added to each object.
+
+The generated assembly for performing the multi-dispatch is what I would expect when compiled with `-O2`. A virtual call is made for 
+each object in order to get their derived class IDs. Multiplication and addition are performed on those IDs to compute the index in
+a function call lookup table, which that function is then called.
+
+A Visitor Pattern implementation would only contain a virtual call for each object and would not involve the additional lookup table
+arithmetic and additional function call.
 
 ## Limitations
 

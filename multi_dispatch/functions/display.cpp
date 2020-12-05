@@ -4,15 +4,15 @@
 #include <iostream>
 
 
-void display(std::ostream &os, const circle &c) {
+inline void display(std::ostream &os, const circle &c) {
     os << "circle{center: (" << c.x << ", " << c.y << "), radius: " << c.radius << "}";
 }
 
-void display(std::ostream &os, const square &s) {
+inline void display(std::ostream &os, const square &s) {
     os << "square{corner: (" << s.x1 << ", " << s.y1 << "), width: " << s.width << "}";
 }
 
-void display(std::ostream &os, const rectangle &r) {
+inline void display(std::ostream &os, const rectangle &r) {
     os << "rectangle{(" << r.x1 << ", " << r.y1 << ")-(" << r.x2 << ", " << r.y2 << ")}";
 }
 
