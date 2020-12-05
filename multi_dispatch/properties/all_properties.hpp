@@ -3,6 +3,6 @@
 
 #include "properties_fwd.hpp"
 #include "area.hpp"
-#include "circmference.hpp"
+#include "circumference.hpp"
 
 #endif

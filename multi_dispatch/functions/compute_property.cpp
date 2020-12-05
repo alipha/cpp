@@ -1,6 +1,7 @@
 #include "compute_property.hpp"
 #include "../shapes/all_shapes.hpp"
 #include "../properties/all_properties.hpp"
+#include "../multi_dispatch/multi_dispatch.hpp"
 
 
 namespace impl {
