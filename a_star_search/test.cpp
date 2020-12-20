@@ -38,32 +38,39 @@ enum class cell_type : unsigned char { space, obstacle };
 
 namespace detail {
 
+    
+struct grid_state {
+    const matrix<cell_type> *grid;
+    point dest;
+};
+
 
 class shortest_path_state {
 public:
-    shortest_path_state(const matrix<cell_type> *grid, point current, point dest) 
-        : grid(grid), cur(current), dest(dest) {}
+    shortest_path_state(point current) : cur(current) {}
 
-    bool done() const { return estimated_remaining_cost() == 0; }
+    bool done(const grid_state &global_state) const { 
+        return estimated_remaining_cost(global_state) == 0; 
+    }
 
     std::size_t additional_cost() const { return 1; }
 
-    std::size_t estimated_remaining_cost() const {
+    std::size_t estimated_remaining_cost(const grid_state &global_state) const {
+        const point &dest = global_state.dest;
         return (cur.x < dest.x ? dest.x - cur.x : cur.x - dest.x)
              + (cur.y < dest.y ? dest.y - cur.y : cur.y - dest.y);
     };
 
-    std::vector<shortest_path_state> next_states() const {
+    std::vector<shortest_path_state> next_states(const grid_state &global_state) const {
         std::vector<shortest_path_state> states;
-        add_next_state(states, -1,  0);
-        add_next_state(states,  1,  0);
-        add_next_state(states,  0, -1);
-        add_next_state(states,  0,  1);
+        add_next_state(global_state, states, -1,  0);
+        add_next_state(global_state, states,  1,  0);
+        add_next_state(global_state, states,  0, -1);
+        add_next_state(global_state, states,  0,  1);
         return states;
     }
 
     point current() const { return cur; }
-    point destination() const { return dest; }
 
     // define < so that states are checked to see if they are already visited
     // (states will be stored in a std::set)
@@ -79,20 +86,19 @@ public:
     */
 
 private:
-    void add_next_state(std::vector<shortest_path_state> &states, int x_change, int y_change) const {
+    void add_next_state(const grid_state &global_state, std::vector<shortest_path_state> &states, int x_change, int y_change) const {
+        const matrix<cell_type> &grid = *global_state.grid;
         if(    (x_change < 0 && cur.x == 0)
-            || (x_change > 0 && cur.x == grid->width() - 1)
+            || (x_change > 0 && cur.x == grid.width() - 1)
             || (y_change < 0 && cur.y == 0)
-            || (y_change > 0 && cur.y == grid->height() - 1)
-            || ((*grid)(cur.x + x_change, cur.y + y_change) == cell_type::obstacle))
+            || (y_change > 0 && cur.y == grid.height() - 1)
+            || (grid(cur.x + x_change, cur.y + y_change) == cell_type::obstacle))
             return;
 
-        states.push_back(shortest_path_state{grid, point{cur.x + x_change, cur.y + y_change}, dest});
+        states.push_back(shortest_path_state{point{cur.x + x_change, cur.y + y_change}});
     }
 
-    const matrix<cell_type> *grid;
     point cur;
-    point dest;
 };
 
 
@@ -110,8 +116,9 @@ namespace std {
 */
 
 std::vector<point> shortest_path_search(const matrix<cell_type> &grid, point start, point dest) {
-    detail::shortest_path_state initial_state{&grid, start, dest};
-    std::deque<detail::shortest_path_state> path = a_star_search(initial_state);
+    detail::shortest_path_state initial_state{start};
+    detail::grid_state global_state = {&grid, dest};
+    std::deque<detail::shortest_path_state> path = a_star_search(initial_state, global_state);
 
     std::vector<point> result;
     for(detail::shortest_path_state &state : path)
