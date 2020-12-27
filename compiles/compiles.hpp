@@ -10,7 +10,7 @@
 
 #define LIPH_COMPILES(type, expr) ((liph::details::make_overloaded( \
                 [](long, auto) constexpr { return false; }, \
-                [](int, auto *liph_wrapper, std::void_t<decltype(sizeof(*liph_wrapper) && (expr))>* = 0) constexpr { return true; } \
+                [](int, auto *liph_wrapper, std::void_t<decltype(sizeof(*liph_wrapper), (expr), true)>* = 0) constexpr { return true; } \
         )) \
         (0, static_cast<liph::details::wrapper<type>*>(nullptr)))
 

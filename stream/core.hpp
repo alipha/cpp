@@ -6,12 +6,20 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 
 
 namespace stream {
+
+
+class streamer_error : public std::runtime_error {
+public:
+    streamer_error(const std::string &what) : std::runtime_error(what) {}
+    streamer_error(const char *what) : std::runtime_error(what) {}
+};
 
 
 namespace detail {
@@ -95,6 +103,8 @@ constexpr auto call_stream_post_init(Op &op, std::tuple<Params&...> &&params) {
 
 template<typename Pipe, typename Gen = char, typename ValueType = decltype(std::declval<Pipe>().next())>
 struct iterator {
+    using value_type = ValueType;
+    
     constexpr iterator() : gen(), pipe(nullptr), value() {}
     constexpr explicit iterator(Pipe *p) : gen(), pipe(p), value(pipe->next()) {}
     constexpr explicit iterator(Gen &&g) : gen(std::move(g)), pipe(&*gen), value(pipe->next()) {}
