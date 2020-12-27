@@ -141,17 +141,17 @@ struct flat_mapping_op {
         while(cont || (cont = prev_op.next())) {
             if(!pipe) {
                 pipe = f(*cont);
-                it = std::begin(pipe);
+                it = std::begin(*pipe);
             }
 
-            if(it != std::end(pipe))
-                return *it;
+            if(*it != std::end(*pipe))
+                return *(*it)++;
 
             pipe.reset();
             cont.reset();
         }
 
-        return std::optional<std::decay_t<decltype(*it)>>();
+        return std::optional<std::decay_t<decltype(**it)>>();
     }
 };
 struct flat_mapping_init {
@@ -161,12 +161,6 @@ struct flat_mapping_init {
         return std::make_tuple(std::forward<Func>(func), typename Op::value_opt_type(), std::optional<Pipe>(), std::optional<typename Pipe::iterator>());
     }
 };
-/*struct flat_mapping_post_init {
-    template<typename Op, typename Func, typename Cont, typename Pipe>
-    constexpr auto operator()(Op &prev_op, Func &func, Cont &cont, Pipe &pipe) const {
-        
-    }
-};*/
 
 
 struct filter_op {
@@ -260,6 +254,7 @@ struct last_term {
 constexpr inline stream_gen upto{detail::upto_gen{}, detail::upto_init{}};
 constexpr inline stream_gen downto{detail::downto_gen{}, detail::downto_init{}};
 constexpr inline stream_op mapping{detail::mapping_op{}};
+constexpr inline stream_op flat_mapping{detail::flat_mapping_op{}, detail::flat_mapping_init{}};
 constexpr inline stream_op filter{detail::filter_op{}};
 constexpr inline stream_op exclude{detail::exclude_op{}};
 constexpr inline stream_op adj_unique{detail::adj_unique_op{}, detail::adj_unique_init{}};  // TODO: move to extra.hpp
