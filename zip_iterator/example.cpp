@@ -1,4 +1,5 @@
 #include "zip_iterator.hpp"
+#include "zip_iterator.hpp"
 
 #include <iostream>
 #include <list>
@@ -9,33 +10,33 @@
 
 int main() {
     std::list<std::string> us{"test", "foo", "bar", "test2", "test3"};
-	std::vector<int> vs{3, 6, 9};
-	std::vector<double> ws{4.5, 2.5, 3.5};
+    std::vector<int> vs{3, 6, 9};
+    std::vector<double> ws{4.5, 2.5, 3.5};
 
     // the iterator ranges are of different lengths (5, 3, and 3), so
     // this will loop only 3 times, to prevent going past the end iterator
-    for(auto [u, v, w] : zip_range(us, vs, ws)) {
+    for(auto &[u, v, w] : zip_range(us, vs, ws)) {
         std::cout << u << v + w << ' ';
+        w /= 10;
     }
     std::cout << '\n';
 
-
     auto range = zip_range(vs, ws);
-/*
+
     std::sort(range.begin(), range.end(), 
-        [](std::tuple<int, double> left, std::tuple<int, double> right) {
-            return std::get<1>(left) < std::get<1>(right);
+        [](zip_value<int, double> left, zip_value<int, double> right) {
+            return get<1>(left) < get<1>(right);
         });
-*/
-    for(auto [v, w] : range) {
+
+    for(const auto &[v, w] : range) {
         std::cout << '(' << v << ", " << w << ") ";
     }
     std::cout << '\n';
 
     std::sort(range.begin(), range.end());
 
-#if 0
-    for(auto [v, w] : const_zip_range(vs, ws)) {
+    // TODO: const_zip_range
+    for(auto [v, w] : zip_range(vs, ws)) {
         std::cout << '(' << v << ", " << w << ") ";
     }
     std::cout << '\n';
@@ -52,12 +53,11 @@ int main() {
     }
     std::cout << '\n';
 
-
-    for(auto it = range.cbegin(); it < range.cend(); ++it) {
+    // TODO: cbegin, cend
+    for(auto it = range.begin(); it < range.end(); ++it) {
         auto [v, w] = *it;
-        std::cout << "from end: " << range.cend() - it << "\t v + w = " << v + w << '\n';
+        std::cout << "from end: " << range.end() - it << "\t v + w = " << v + w << '\n'; // TODO: cend
     }
     std::cout << '\n';
-#endif
+//#endif
 }
-

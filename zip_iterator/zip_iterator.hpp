@@ -14,34 +14,31 @@
 namespace detail {
 
 
-struct iter_tuple_tag {};
-
-
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 
 template<typename Cat>
 constexpr int iterator_category_order() { 
-	if      constexpr(std::is_same_v<std::input_iterator_tag,         Cat>) return 1;
-	else if constexpr(std::is_same_v<std::output_iterator_tag,        Cat>) return 2;
-	else if constexpr(std::is_same_v<std::forward_iterator_tag,       Cat>) return 3;
-	else if constexpr(std::is_same_v<std::bidirectional_iterator_tag, Cat>) return 4;
-	else if constexpr(std::is_same_v<std::random_access_iterator_tag, Cat>) return 5;
-	else 
-		static_assert(sizeof(Cat) && false, "Unknown iteratory category tag."); 
+    if      constexpr(std::is_same_v<std::input_iterator_tag,         Cat>) return 1;
+    else if constexpr(std::is_same_v<std::output_iterator_tag,        Cat>) return 2;
+    else if constexpr(std::is_same_v<std::forward_iterator_tag,       Cat>) return 3;
+    else if constexpr(std::is_same_v<std::bidirectional_iterator_tag, Cat>) return 4;
+    else if constexpr(std::is_same_v<std::random_access_iterator_tag, Cat>) return 5;
+    else 
+        static_assert(sizeof(Cat) && false, "Unknown iteratory category tag."); 
 }
 
 
 template<int Order>
 constexpr auto order_to_iterator_category() {
-	if      constexpr(Order == 1) return std::input_iterator_tag();
-	else if constexpr(Order == 2) return std::output_iterator_tag();
-	else if constexpr(Order == 3) return std::forward_iterator_tag();
-	else if constexpr(Order == 4) return std::bidirectional_iterator_tag();
-	else if constexpr(Order == 5) return std::random_access_iterator_tag();
-	else 
-		static_assert(Order && false, "Invalid iterator_category_order value.");
+    if      constexpr(Order == 1) return std::input_iterator_tag();
+    else if constexpr(Order == 2) return std::output_iterator_tag();
+    else if constexpr(Order == 3) return std::forward_iterator_tag();
+    else if constexpr(Order == 4) return std::bidirectional_iterator_tag();
+    else if constexpr(Order == 5) return std::random_access_iterator_tag();
+    else 
+        static_assert(Order && false, "Invalid iterator_category_order value.");
 }
 
 
@@ -51,20 +48,20 @@ constexpr auto min_iterator_category() { return typename std::iterator_traits<It
 
 template<typename FirstIt, typename SecondIt, typename... RestIts>
 constexpr auto min_iterator_category() {
-	constexpr int first_order = iterator_category_order<typename std::iterator_traits<FirstIt>::iterator_category>();
-	constexpr int rest_order = iterator_category_order<decltype(min_iterator_category<SecondIt, RestIts...>())>();
-	
-	static_assert(first_order + rest_order != 3, "Cannot have both an input iterator and an output iterator in the same zip_iterator.");
-	
-	constexpr int min_order = first_order < rest_order ? first_order : rest_order;
-	return order_to_iterator_category<min_order>();
+    constexpr int first_order = iterator_category_order<typename std::iterator_traits<FirstIt>::iterator_category>();
+    constexpr int rest_order = iterator_category_order<decltype(min_iterator_category<SecondIt, RestIts...>())>();
+    
+    static_assert(first_order + rest_order != 3, "Cannot have both an input iterator and an output iterator in the same zip_iterator.");
+    
+    constexpr int min_order = first_order < rest_order ? first_order : rest_order;
+    return order_to_iterator_category<min_order>();
 }
 
 
 template<typename T, typename Default>
 using default_if_void = std::conditional_t<std::is_same_v<void, T>, Default, T>;
-	
-	
+    
+    
 template<typename Cat>
 using enable_if_bidirectional = std::enable_if_t<std::is_same_v<std::bidirectional_iterator_tag, Cat> || std::is_same_v<std::random_access_iterator_tag, Cat>>;
 
@@ -114,13 +111,17 @@ struct zip_iterator;
 
 template<typename... Types>
 struct zip_value {
+private:
+    using variant_type = std::variant<std::monostate, std::tuple<Types...>, std::tuple<Types&...>>;
+    
+public:
     zip_value() : values() {}
 
     template<typename... OtherTypes>
-    zip_value(const std::tuple<OtherTypes...> &other) : values(std::tuple<Types...>(other)) {}
+    explicit zip_value(const std::tuple<OtherTypes...> &other) : values(std::tuple<Types...>(other)) {}
 
     template<typename... OtherTypes>
-    zip_value(std::tuple<OtherTypes...> &&other) : values(std::tuple<Types...>(std::move(other))) {}
+    explicit zip_value(std::tuple<OtherTypes...> &&other) : values(std::tuple<Types...>(std::move(other))) {}
 
 
     zip_value(const zip_value &other) : values() { assign(other.values); }
@@ -137,6 +138,16 @@ struct zip_value {
 
     template<typename... OtherTypes>
     zip_value &operator=(std::tuple<OtherTypes...> &&other) { return assign_tuple(std::move(other)); }
+    
+    zip_value &reset(const zip_value &other) {
+        values = other.values;
+        return *this;
+    }
+    
+    zip_value &reset(zip_value &&other) {
+        values = std::move(other.values);
+        return *this;
+    }
 
     operator std::tuple<Types...>() const {
         std::visit(detail::overloaded {
@@ -153,21 +164,41 @@ struct zip_value {
 
 
     template<std::size_t Index>
-    auto &get() & { return get_helper<Index>(*this); }
+    auto &get() & { 
+        return std::visit(detail::overloaded {
+            [](std::monostate) -> std::tuple_element_t<Index, std::tuple<Types...>>& { throw std::logic_error("zip_value is empty."); },
+            [](auto &t) -> std::tuple_element_t<Index, std::tuple<Types...>>& { return std::get<Index>(t); }
+        }, values);
+    }
 
     template<std::size_t Index>
-    auto &&get() && { return get_helper<Index>(*this); }
-
+    auto &&get() && { 
+        return std::visit(detail::overloaded {
+            [](std::monostate) -> std::tuple_element_t<Index, std::tuple<Types...>>&& { throw std::logic_error("zip_value is empty."); },
+            [](auto &&t) -> std::tuple_element_t<Index, std::tuple<Types...>>&& { return std::move(std::get<Index>(t)); }
+        }, std::move(values));
+    }
+    
     template<std::size_t Index>
-    const auto &get() const & { return get_helper<Index>(*this); }
+    const auto &get() const & { 
+        return std::visit(detail::overloaded {
+            [](std::monostate) -> const std::tuple_element_t<Index, std::tuple<Types...>>& { throw std::logic_error("zip_value is empty."); },
+            [](auto &t) -> const std::tuple_element_t<Index, std::tuple<Types...>>& { return std::get<Index>(t); }
+        }, values);
+    }
 
 private:
     template<typename... Its>
     friend struct zip_iterator;
 
+    template<typename... Ts>
+    friend bool operator<(const zip_value<Ts...> &left, const zip_value<Ts...> &right);
+    
+    
     template<typename... Its>
     zip_value &reset(const std::tuple<Types&...> &other) { 
-        values = other; 
+        values = std::monostate();
+        values = variant_type(other);
         return *this;
     }
 
@@ -194,16 +225,7 @@ private:
         return *this;
     }
 
-    template<std::size_t Index, typename ZipValue>
-    auto &&get_helper(ZipValue &&value) {
-        return std::visit(detail::overloaded {
-            [](std::monostate) -> std::tuple_element_t<Index, std::tuple<Types...>>& { throw std::logic_error("zip_value is empty."); },
-            [](auto &&t) -> std::tuple_element_t<Index, std::tuple<Types...>>& { return std::get<Index>(std::forward<decltype(t)>(t)); }
-        }, std::forward<ZipValue>(value).values);
-    }
-
-
-    std::variant<std::monostate, std::tuple<Types...>, std::tuple<Types&...>> values;
+    variant_type values;
 };
 
 
@@ -254,62 +276,81 @@ bool operator==(const zip_value<Types...> &left, const zip_value<Types...> &righ
 
 template<typename... Its>
 struct zip_iterator {
-	static_assert(sizeof...(Its) > 0, "At least one iterator type needs to be provided.");
+    static_assert(sizeof...(Its) > 0, "At least one iterator type needs to be provided.");
     static_assert((!std::is_reference_v<Its> && ...), "zip_iterator cannot hold references to iterators.");
-	static_assert((sizeof(typename std::iterator_traits<Its>::iterator_category) && ...), "Not all template arguments are iterator types.");
-	
-	using iterator_category = decltype(detail::min_iterator_category<Its...>());
-	using value_type = zip_value<detail::default_if_void<typename std::iterator_traits<Its>::value_type, Its>...>;
-	using difference_type = std::ptrdiff_t;
-	using reference = value_type&; 
-	using pointer = value_type*;
-	
-	zip_iterator() {}
+    static_assert((sizeof(typename std::iterator_traits<Its>::iterator_category) && ...), "Not all template arguments are iterator types.");
+    
+    using iterator_category = decltype(detail::min_iterator_category<Its...>());
+    using value_type = zip_value<detail::default_if_void<typename std::iterator_traits<Its>::value_type, Its>...>;
+    using difference_type = std::ptrdiff_t;
+    using reference = value_type&; 
+    using pointer = value_type*;
+    
+    zip_iterator() {}
     zip_iterator(std::tuple<Its...> its) : its(std::move(its)) {}
-	zip_iterator(Its... its) : its(std::move(its)...) {}
-	
+    zip_iterator(Its... its) : its(std::move(its)...) {}
+    
+    zip_iterator(const zip_iterator &other) = default;
+    zip_iterator(zip_iterator &&other) = default;
+    
+    zip_iterator &operator=(const zip_iterator &other) {
+        its = other.its;
+        values.reset(other.values);
+        return *this;
+    }
+    
+    zip_iterator &operator=(zip_iterator &&other) {
+        its = std::move(other.its);
+        values.reset(std::move(other.values));
+        return *this;
+    }
+    
 
     std::tuple<Its...> &get() noexcept { return its; }
 
     const std::tuple<Its...> &get() const noexcept { return its; }
 
 
-	reference operator*() const {
+    reference operator*() const {
         return values.reset(std::apply([](auto&... its) { return std::tie(*its...); }, its));
     }
+    
+    pointer operator->() const {
+        return &values.reset(std::apply([](auto&... its) { return std::tie(*its...); }, its));
+    }
 
-	template<typename Cat = iterator_category, typename = std::enable_if_t<std::is_same_v<std::random_access_iterator_tag, Cat>>>
+    template<typename Cat = iterator_category, typename = std::enable_if_t<std::is_same_v<std::random_access_iterator_tag, Cat>>>
     reference operator[](std::ptrdiff_t n) const {
-		return values.reset(std::apply([n](auto&... its) { return std::tie(its[n]...); }, its));
-	}
+        return values.reset(std::apply([n](auto&... its) { return std::tie(its[n]...); }, its));
+    }
 
 
     zip_iterator &operator++() { std::apply([](auto&... its) { (++its, ...); }, its); return *this; }
-	
-	zip_iterator operator++(int) { zip_iterator ret(*this); ++ret; return ret; }
-	
-	
-	template<typename Cat = iterator_category, typename = detail::enable_if_bidirectional<Cat>>
-	zip_iterator &operator--() { std::apply([](auto&... its) { (--its, ...); }, its); return *this; }
-	
-	template<typename Cat = iterator_category, typename = detail::enable_if_bidirectional<Cat>>
-	zip_iterator operator--(int) { zip_iterator ret(*this); --ret; return ret; }
-	
-	
-	template<typename Cat = iterator_category, typename = std::enable_if_t<std::is_same_v<std::random_access_iterator_tag, Cat>>>
-	zip_iterator &operator+=(std::ptrdiff_t n) {
-		std::apply([n](auto&... its) { ((its += n), ...); }, its);
-		return *this;
-	}
-	
-	template<typename Cat = iterator_category, typename = std::enable_if_t<std::is_same_v<std::random_access_iterator_tag, Cat>>>
-	zip_iterator &operator-=(std::ptrdiff_t n) {
-		*this += -n;
-		return *this;
-	}
-	
+    
+    zip_iterator operator++(int) { zip_iterator ret(*this); ++ret; return ret; }
+    
+    
+    template<typename Cat = iterator_category, typename = detail::enable_if_bidirectional<Cat>>
+    zip_iterator &operator--() { std::apply([](auto&... its) { (--its, ...); }, its); return *this; }
+    
+    template<typename Cat = iterator_category, typename = detail::enable_if_bidirectional<Cat>>
+    zip_iterator operator--(int) { zip_iterator ret(*this); --ret; return ret; }
+    
+    
+    template<typename Cat = iterator_category, typename = std::enable_if_t<std::is_same_v<std::random_access_iterator_tag, Cat>>>
+    zip_iterator &operator+=(std::ptrdiff_t n) {
+        std::apply([n](auto&... its) { ((its += n), ...); }, its);
+        return *this;
+    }
+    
+    template<typename Cat = iterator_category, typename = std::enable_if_t<std::is_same_v<std::random_access_iterator_tag, Cat>>>
+    zip_iterator &operator-=(std::ptrdiff_t n) {
+        *this += -n;
+        return *this;
+    }
+    
 private:
-	std::tuple<Its...> its;
+    std::tuple<Its...> its;
     mutable value_type values;
 };
 
@@ -391,7 +432,7 @@ operator>=(const zip_iterator<Its...> &left, const zip_iterator<Its...> &right) 
 
 template<typename... Containers>
 struct zip_range {
-	static_assert(sizeof...(Containers) > 0, "At least one container needs to be provided.");
+    static_assert(sizeof...(Containers) > 0, "At least one container needs to be provided.");
 
     using iterator = zip_iterator<std::remove_reference_t<decltype(std::begin(std::declval<Containers&>()))>...>;
     using const_iterator = zip_iterator<std::remove_reference_t<decltype(std::cbegin(std::declval<Containers&>()))>...>;
