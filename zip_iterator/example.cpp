@@ -21,25 +21,24 @@ int main() {
 
 
     auto range = zip_range(vs, ws);
-
+/*
     std::sort(range.begin(), range.end(), 
         [](std::tuple<int, double> left, std::tuple<int, double> right) {
             return std::get<1>(left) < std::get<1>(right);
         });
-
+*/
     for(auto [v, w] : range) {
         std::cout << '(' << v << ", " << w << ") ";
     }
     std::cout << '\n';
 
-
     std::sort(range.begin(), range.end());
 
+#if 0
     for(auto [v, w] : const_zip_range(vs, ws)) {
         std::cout << '(' << v << ", " << w << ") ";
     }
     std::cout << '\n';
-
 
     zip_iterator it = zip_iterator(us.begin(), vs.begin(), ws.begin() + 1);
     zip_iterator last = zip_iterator(us.end(), vs.end(), ws.end());
@@ -59,5 +58,6 @@ int main() {
         std::cout << "from end: " << range.cend() - it << "\t v + w = " << v + w << '\n';
     }
     std::cout << '\n';
+#endif
 }
 

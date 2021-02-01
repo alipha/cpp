@@ -4,35 +4,21 @@
 #include <cstddef>
 #include <functional>
 #include <iterator>
+#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 #include <utility>
-
-
-namespace std {
-    template<typename... T>
-    void swap(std::tuple<T&...> left, std::tuple<T&...> right) {
-        std::tuple<T...> temp = left;
-        left = right;
-        right = temp;
-    }
-}
+#include <variant>
 
 
 namespace detail {
-	
-
-template<typename Func, std::size_t Index, typename... Tuples>
-auto combine_tuples(std::index_sequence<Index>, Func &&func, Tuples&&... tuples) {
-    return std::make_tuple(func(std::get<Index>(std::forward<Tuples>(tuples))...));
-}
 
 
-template<typename Func, std::size_t FirstIndex, std::size_t SecondIndex, std::size_t... RestIndexes, typename... Tuples>
-auto combine_tuples(std::index_sequence<FirstIndex, SecondIndex, RestIndexes...>, Func &&func, Tuples&&... tuples) {
-    return std::tuple_cat(combine_tuples(std::index_sequence<FirstIndex>(), std::forward<Func>(func), std::forward<Tuples>(tuples)...),
-        combine_tuples(std::index_sequence<SecondIndex, RestIndexes...>(), std::forward<Func>(func), std::forward<Tuples>(tuples)...));
-}
+struct iter_tuple_tag {};
+
+
+template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 
 template<typename Cat>
@@ -83,7 +69,18 @@ template<typename Cat>
 using enable_if_bidirectional = std::enable_if_t<std::is_same_v<std::bidirectional_iterator_tag, Cat> || std::is_same_v<std::random_access_iterator_tag, Cat>>;
 
 
-} // namespace detail
+
+template<typename Func, std::size_t Index, typename... Tuples>
+auto combine_tuples(std::index_sequence<Index>, Func &&func, Tuples&&... tuples) {
+    return std::make_tuple(func(std::get<Index>(std::forward<Tuples>(tuples))...));
+}
+
+
+template<typename Func, std::size_t FirstIndex, std::size_t SecondIndex, std::size_t... RestIndexes, typename... Tuples>
+auto combine_tuples(std::index_sequence<FirstIndex, SecondIndex, RestIndexes...>, Func &&func, Tuples&&... tuples) {
+    return std::tuple_cat(combine_tuples(std::index_sequence<FirstIndex>(), std::forward<Func>(func), std::forward<Tuples>(tuples)...),
+        combine_tuples(std::index_sequence<SecondIndex, RestIndexes...>(), std::forward<Func>(func), std::forward<Tuples>(tuples)...));
+}
 
 
 template<typename Func, typename FirstTuple, typename... Tuples>
@@ -99,15 +96,159 @@ auto combine_tuples(Func &&func, FirstTuple &&first_tuple, Tuples&&... tuples) {
 }
 
 
-namespace detail {
+template<typename Func, typename... Tuples>
+bool all_true(Func &&func, Tuples&&... tuples) {
+    return std::apply([](auto... values) { return (values && ...); },
+        combine_tuples(func, tuples...)
+    );
+}
 
-    template<typename Func, typename... Tuples>
-    bool all_true(Func &&func, Tuples&&... tuples) {
-        return std::apply([](auto... values) { return (values && ...); },
-            combine_tuples(func, tuples...)
-        );
-    }
+
 } // namespace detail
+
+
+
+template<typename... Its>
+struct zip_iterator;
+
+
+template<typename... Types>
+struct zip_value {
+    zip_value() : values() {}
+
+    template<typename... OtherTypes>
+    zip_value(const std::tuple<OtherTypes...> &other) : values(std::tuple<Types...>(other)) {}
+
+    template<typename... OtherTypes>
+    zip_value(std::tuple<OtherTypes...> &&other) : values(std::tuple<Types...>(std::move(other))) {}
+
+
+    zip_value(const zip_value &other) : values() { assign(other.values); }
+
+    zip_value(zip_value &&other) : values() { assign(std::move(other.values)); }
+    
+
+    zip_value &operator=(const zip_value &other) { return assign(other.values); }
+    
+    zip_value &operator=(zip_value &&other) { return assign(std::move(other.values)); }
+
+    template<typename... OtherTypes>
+    zip_value &operator=(const std::tuple<OtherTypes...> &other) { return assign_tuple(other); }
+
+    template<typename... OtherTypes>
+    zip_value &operator=(std::tuple<OtherTypes...> &&other) { return assign_tuple(std::move(other)); }
+
+    operator std::tuple<Types...>() const {
+        std::visit(detail::overloaded {
+            [](std::monostate) { 
+                //if constexpr(std::is_default_constructible_v<std::tuple<Types...>>) {
+                //    return {}; 
+                //} else {
+                    throw std::logic_error("zip_value is empty.");
+                //}
+            },
+            [](auto &v) { return v; }
+        }, values);
+    }
+
+
+    template<std::size_t Index>
+    auto &get() & { return get_helper<Index>(*this); }
+
+    template<std::size_t Index>
+    auto &&get() && { return get_helper<Index>(*this); }
+
+    template<std::size_t Index>
+    const auto &get() const & { return get_helper<Index>(*this); }
+
+private:
+    template<typename... Its>
+    friend struct zip_iterator;
+
+    template<typename... Its>
+    zip_value &reset(const std::tuple<Types&...> &other) { 
+        values = other; 
+        return *this;
+    }
+
+
+    template<typename Other>
+    zip_value &assign(Other &&other) {
+        std::visit(detail::overloaded {
+            [](std::monostate, std::monostate)   {},
+            [this](auto &, std::monostate)       { this->values = std::monostate(); },
+            [this](std::monostate, auto &&right) { this->values = std::tuple<Types...>(std::forward<decltype(right)>(right)); },
+            [](auto &left, auto &&right)         { left = std::forward<decltype(right)>(right); }
+        }, values, std::forward<Other>(other));
+
+        return *this;
+    }
+
+    template<typename Other>
+    zip_value &assign_tuple(Other &&other) {
+        std::visit(detail::overloaded {
+            [this, &other](std::monostate) { this->values = std::tuple<Types...>(std::forward<decltype(other)>(other)); },
+            [&other](auto &left)           { left = std::forward<decltype(other)>(other); }
+        }, values);
+
+        return *this;
+    }
+
+    template<std::size_t Index, typename ZipValue>
+    auto &&get_helper(ZipValue &&value) {
+        return std::visit(detail::overloaded {
+            [](std::monostate) -> std::tuple_element_t<Index, std::tuple<Types...>>& { throw std::logic_error("zip_value is empty."); },
+            [](auto &&t) -> std::tuple_element_t<Index, std::tuple<Types...>>& { return std::get<Index>(std::forward<decltype(t)>(t)); }
+        }, std::forward<ZipValue>(value).values);
+    }
+
+
+    std::variant<std::monostate, std::tuple<Types...>, std::tuple<Types&...>> values;
+};
+
+
+template<std::size_t Index, typename... Types>
+auto &get(zip_value<Types...> &value) {
+    return value.template get<Index>();
+}
+
+
+template<std::size_t Index, typename... Types>
+auto &&get(zip_value<Types...> &&value) {
+    return std::move(value).template get<Index>();
+}
+
+
+template<std::size_t Index, typename... Types>
+const auto &get(const zip_value<Types...> &value) {
+    return value.template get<Index>();
+}
+
+
+template<typename... Types>
+bool operator<(const zip_value<Types...> &left, const zip_value<Types...> &right) {
+    return std::visit(detail::overloaded {
+        [](std::monostate, std::monostate) { return false; },
+        [](std::monostate, auto &) { return true; },
+        [](auto &, std::monostate) { return false; },
+        [](auto &l, auto &r) { return l < r; }
+    }, left.values, right.values);
+}
+
+template<typename... Types>
+bool operator>(const zip_value<Types...> &left, const zip_value<Types...> &right) { return right > left; }
+
+template<typename... Types>
+bool operator<=(const zip_value<Types...> &left, const zip_value<Types...> &right) { return !(right > left); }
+
+template<typename... Types>
+bool operator>=(const zip_value<Types...> &left, const zip_value<Types...> &right) { return !(left < right); }
+
+template<typename... Types>
+bool operator!=(const zip_value<Types...> &left, const zip_value<Types...> &right) { return left < right || right < left; }
+
+template<typename... Types>
+bool operator==(const zip_value<Types...> &left, const zip_value<Types...> &right) { return !(left != right); }
 
 
 
@@ -118,11 +259,10 @@ struct zip_iterator {
 	static_assert((sizeof(typename std::iterator_traits<Its>::iterator_category) && ...), "Not all template arguments are iterator types.");
 	
 	using iterator_category = decltype(detail::min_iterator_category<Its...>());
-	using value_type = std::tuple<typename std::iterator_traits<Its>::value_type...>;
+	using value_type = zip_value<detail::default_if_void<typename std::iterator_traits<Its>::value_type, Its>...>;
 	using difference_type = std::ptrdiff_t;
-	using reference = std::tuple<detail::default_if_void<typename std::iterator_traits<Its>::reference, Its&>...>;
-	//using const_reference = std::tuple<typename std::iterator_traits<const Its>::reference...>;
-	using pointer = void;
+	using reference = value_type&; 
+	using pointer = value_type*;
 	
 	zip_iterator() {}
     zip_iterator(std::tuple<Its...> its) : its(std::move(its)) {}
@@ -134,30 +274,17 @@ struct zip_iterator {
     const std::tuple<Its...> &get() const noexcept { return its; }
 
 
-	reference operator*() { return std::apply([](auto&... its) { return std::tie(*its...); }, its); }
-	
-    /*
-	template<typename Cat = iterator_category, typename = std::enable_if_t<!std::is_same_v<std::output_iterator_tag, Cat>>>
-	const const_reference operator*() const { 
-		return std::apply([](const auto&... its) { return std::tie(*its...); }, its);
-	}
-    */
-	
-	
-	template<typename Cat = iterator_category, typename = std::enable_if_t<std::is_same_v<std::random_access_iterator_tag, Cat>>>
-    reference operator[](std::ptrdiff_t n) {
-		std::apply([n](auto&... its) { return std::tie(its[n]...); }, its);
-	}
-	
-    /*
-	template<typename Cat = iterator_category, typename = std::enable_if_t<std::is_same_v<std::random_access_iterator_tag, Cat>>>
-	const const_reference operator[](std::ptrdiff_t n) const {
-		std::apply([n](const auto&... its) { return std::tie(its[n]...); }, its);
-	}
-	*/
+	reference operator*() const {
+        return values.reset(std::apply([](auto&... its) { return std::tie(*its...); }, its));
+    }
 
-	
-	zip_iterator &operator++() { std::apply([](auto&... its) { (++its, ...); }, its); return *this; }
+	template<typename Cat = iterator_category, typename = std::enable_if_t<std::is_same_v<std::random_access_iterator_tag, Cat>>>
+    reference operator[](std::ptrdiff_t n) const {
+		return values.reset(std::apply([n](auto&... its) { return std::tie(its[n]...); }, its));
+	}
+
+
+    zip_iterator &operator++() { std::apply([](auto&... its) { (++its, ...); }, its); return *this; }
 	
 	zip_iterator operator++(int) { zip_iterator ret(*this); ++ret; return ret; }
 	
@@ -183,6 +310,7 @@ struct zip_iterator {
 	
 private:
 	std::tuple<Its...> its;
+    mutable value_type values;
 };
 
 
@@ -211,7 +339,7 @@ template<typename... Its>
 std::enable_if_t<std::is_same_v<std::random_access_iterator_tag, typename zip_iterator<Its...>::iterator_category>, std::ptrdiff_t>
 operator-(const zip_iterator<Its...> &left, const zip_iterator<Its...> &right) {
     return std::apply([](auto... values) { return std::min(values...); },
-        combine_tuples([](auto &left_it, auto &right_it) {
+        detail::combine_tuples([](auto &left_it, auto &right_it) {
             return left_it - right_it;
         }, left.get(), right.get())
     );
@@ -221,7 +349,7 @@ operator-(const zip_iterator<Its...> &left, const zip_iterator<Its...> &right) {
 template<typename... Its>
 bool operator==(const zip_iterator<Its...> &left, const zip_iterator<Its...> &right) {
     return std::apply([](auto... values) { return (values || ...); },
-        combine_tuples([](auto &left_it, auto &right_it) {
+        detail::combine_tuples([](auto &left_it, auto &right_it) {
             return left_it == right_it;
         }, left.get(), right.get())
     );
@@ -308,5 +436,15 @@ struct const_zip_range : zip_range<const Containers...> {
     const_zip_range(Containers&... conts) : zip_range<const Containers...>(conts...) {}
 };
 
+
+namespace std {
+    template<typename... Types>
+    struct tuple_size<zip_value<Types...>> : integral_constant<size_t, sizeof...(Types)> {};
+
+    template<size_t Index, typename... Types>
+    struct tuple_element<Index, zip_value<Types...>> {
+        using type = tuple_element_t<Index, tuple<Types...>>;
+    };
+}
 
 #endif
