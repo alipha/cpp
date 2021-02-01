@@ -157,7 +157,7 @@ While using multi_dispatch requires a little boilerplate, the boilerplate is eas
 
 * If argument order does not matter (e.g., collides(Square&, Circle&) has the same implementation
     as collides(Circle&, Square&)) then unordered_multi_dispatch may be used to avoid having to
-    write both overloads (TO BE IMPLEMENTED)
+    write both overloads
 
 ## Performance
 
