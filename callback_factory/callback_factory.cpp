@@ -89,9 +89,13 @@ callback_page &callback_page::operator=(callback_page &&other) {
 
 
 callback_page::~callback_page() {
-    // TODO: call deleter on all blocks
-    if(start)
-        munmap(start, page_size);
+    if(!start)
+        return;
+
+    for(callback_block *block = start; block < next_available; ++block)
+        block->deleter(block->code);
+
+    munmap(start, page_size);
 }
 
 
@@ -117,16 +121,22 @@ bool callback_page::deallocate(callback_block *ptr) const {
         throw std::logic_error("deallocating unallocated pointer " + ptr_to_str(ptr)
                 + " > " + ptr_to_str(next_available));
 
+    ptr->deleter(ptr->code);
+    ptr->deleter = [](unsigned char*){};
+
     ++unused_block_count;
     factory->unused_blocks.push_back(block_ref{ptr, this});
-
-    // TODO: call callback_block::deleter
 
     if(debug && start + unused_block_count > next_available)
         throw std::logic_error("page was over-deallocated: " + std::to_string(next_available - start)
                 + std::to_string(unused_block_count));
     
-    return start + unused_block_count == next_available;
+    if(start + unused_block_count == next_available) {
+        next_available = start;
+        return true;
+    } else {
+        return false;
+    }
 }
 
 
@@ -153,8 +163,12 @@ void callback_factory::free_raw_callback(callback_factory::func_ptr ptr) {
                 + ", first page = " + ptr_to_str(pages.begin()->start));
 
     --it;
-    if(it->deallocate(reinterpret_cast<callback_block*>(ptr)) && &*it != current_page)
-        pages.erase(it);
+    if(it->deallocate(reinterpret_cast<callback_block*>(ptr))) {
+        unused_blocks.erase(std::remove_if(unused_blocks.begin(), unused_blocks.end(), 
+                    [it](block_ref ref) { return ref.page_ptr == &*it; }), unused_blocks.end());
+        if(&*it != current_page)
+            pages.erase(it);
+    }
 }
 
 

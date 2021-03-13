@@ -9,7 +9,7 @@
 
 struct callback_block {
     unsigned char code[37];
-    void (*deleter)(void*);
+    void (*deleter)(unsigned char*);
 };
 
 
@@ -83,8 +83,8 @@ struct callback_factory {
 
 
     template<typename T, typename Class>
-    func_ptr make_raw_callback(T *obj_ptr, void (Class::*mem_ptr)()) {
-        auto [block_ptr, page_ptr] = allocate(make_block(obj_ptr, mem_ptr));
+    func_ptr make_raw_callback(T &&obj_ptr, void (Class::*mem_ptr)()) {
+        auto [block_ptr, page_ptr] = allocate(make_block(std::forward<T>(obj_ptr), mem_ptr));
         return reinterpret_cast<func_ptr>(block_ptr->code);
     }
 
@@ -92,13 +92,23 @@ struct callback_factory {
 
 
     template<typename T, typename Class>
-    static callback_block make_block(T *obj_ptr, void (Class::*mem_ptr)()) {
-        static_assert(std::is_convertible_v<T*, Class*>);
+    static callback_block make_block(T &&obj_ptr, void (Class::*mem_ptr)()) {
+        if constexpr(std::is_pointer_v<std::remove_reference_t<T>>) {
+            using Ptr = std::remove_reference_t<T>;
+            static_assert(std::is_convertible_v<Ptr, const Class*>);
 
-        callback_block block{{}, [](void*){}}; // TODO: &obj_deleter<T>};
-        patch_code(block.code, reinterpret_cast<std::uint64_t>(obj_ptr), reinterpret_cast<mem_func_ptr&>(mem_ptr));
+            callback_block block{{}, [](unsigned char*){}};
+            patch_code(block.code, reinterpret_cast<std::uint64_t>(obj_ptr), reinterpret_cast<mem_func_ptr&>(mem_ptr));
+            return block;
+        } else {
+            using Obj = std::decay_t<T>;
+            static_assert(std::is_convertible_v<Obj*, Class*>);
 
-        return block;
+            Obj *copy = new Obj(std::forward<T>(obj_ptr));
+            callback_block block{{}, &obj_deleter<Obj, 0>};
+            patch_code(block.code, reinterpret_cast<std::uint64_t>(copy), reinterpret_cast<mem_func_ptr&>(mem_ptr));
+            return block;
+        }
     }
 
     static void patch_code(unsigned char *code, std::uint64_t obj_ptr, mem_func_ptr func);
@@ -115,9 +125,9 @@ struct callback_factory {
     }
 
 
-    template<typename Class>
-    static void obj_deleter(void *p) {
-        delete static_cast<Class*>(p);
+    template<typename Class, std::size_t IntArgs>
+    static void obj_deleter(unsigned char *code) {
+        delete *reinterpret_cast<Class**>(code + 12 + 3 * IntArgs);
     }
 
 
