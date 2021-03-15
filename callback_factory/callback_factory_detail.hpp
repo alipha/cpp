@@ -1,8 +1,11 @@
 #ifndef LIPH_CALLBACK_FACTORY_DETAIL_HPP
 #define LIPH_CALLBACK_FACTORY_DETAIL_HPP
 
+#include "function_traits.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <tuple>
+#include <type_traits>
 
 
 namespace liph {
@@ -11,6 +14,46 @@ class callback_factory;
 
 
 namespace detail {
+
+
+template<typename T>
+constexpr std::size_t register_count() {
+	if(std::is_member_function_pointer_v<T>) {
+		return 2;
+	} else if(std::is_reference_v<T> || std::is_pointer_v<T> || std::is_integral_v<T> || std::is_enum_v<T>) {
+		return sizeof(T) == 16 ? 2 : 1;
+	} else if(std::is_floating_point_v<T>) {
+		return 0;
+	} else if(!std::is_trivially_copyable_v<T>) {
+		return 1;
+	} else if(sizeof(T) <= 8) {
+		return 1;
+	} else if(sizeof(T) <= 16) {
+		return 2;
+	} else {
+		return 1;
+	}
+}
+
+
+template<typename Tuple>
+struct registers_used {
+	static_assert(sizeof(Tuple) && false, "Template argument must be a std::tuple");
+};
+
+template<>
+struct registers_used<std::tuple<>> {
+	static constexpr std::size_t value = 0;
+};
+
+template<typename... Args>
+struct registers_used<std::tuple<Args...>> {
+	static constexpr std::size_t value = (register_count<Args>() + ...);
+};
+
+template<typename Tuple>
+constexpr std::size_t registers_used_v = registers_used<Tuple>::value;
+
 
 
 struct callback_block {
