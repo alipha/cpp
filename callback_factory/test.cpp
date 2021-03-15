@@ -46,7 +46,7 @@ int main() {
     auto mp = &baz::test3;
     void (baz::*bp)() = mp;
 
-    callback_factory f;
+    liph::callback_factory f;
     void (*p1)() = f.make_raw_callback(&b, &bar::test);
     void (*p2)() = f.make_raw_callback(&c, &bar::test);
     void (*p3)() = f.make_raw_callback(&c, &bar::test2);
