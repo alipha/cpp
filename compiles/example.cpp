@@ -1,7 +1,10 @@
 #include "compiles.hpp"
 #include <iostream>
+#include <string>
 #include <tuple>
 
+
+// 
 
 template<typename T>
 void test1(const T &x) {
@@ -76,6 +79,26 @@ void test6(const std::tuple<Args...> &) {
 }
 
 
+template<typename T>
+void test7() {
+    if constexpr(LIPH_HAS_MEMBER(T, size)) {
+        std::cout << "T::size exists\n";
+    } else {
+        std::cout << "T::size does not exist\n";
+    }
+}
+
+
+template<typename T>
+void test8() {
+    if constexpr(LIPH_HAS_TYPE_MEMBER(T, value_type)) {
+        std::cout << "T::value_type exists\n";
+    } else {
+        std::cout << "T::value_type does not exist\n";
+    }
+}
+
+
 // works in c++20 (but then I'm not sure why you wouldn't just use concepts)
 //template<typename T>
 //std::enable_if_t<LIPH_COMPILES(T, LIPH_DECLVAL(T) / 5)> bar() {}
@@ -103,5 +126,12 @@ int main() {
 
     test6(std::tuple<int, double, const char*>{2, 12.0, "test"});
     test6(std::tuple<int, test_struct>());
+    
+    test7<std::tuple<int>>();
+    test7<std::string>();
+
+    test8<std::tuple<int>>();
+    test8<std::string>();
+
     //bar<int>();
 }
