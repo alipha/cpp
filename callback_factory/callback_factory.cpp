@@ -67,6 +67,10 @@ std::string ptr_to_str(T *p) {
     return std::to_string(reinterpret_cast<std::uintptr_t>(p));
 }
 
+std::string ptr_to_str(std::uint64_t p) {
+    return std::to_string(reinterpret_cast<std::uintptr_t>(p));
+}
+
 
 
 namespace detail {
@@ -171,7 +175,7 @@ namespace detail {
 
 
 
-void callback_factory::free_raw_callback(callback_factory::func_ptr ptr) {
+void callback_factory::free_raw_callback_impl(std::uint64_t ptr) {
     auto it = pages.upper_bound(ptr);
 
     if(debug && pages.empty())
@@ -192,25 +196,23 @@ void callback_factory::free_raw_callback(callback_factory::func_ptr ptr) {
 }
 
 
-void callback_factory::patch_code(unsigned char *code, std::uint64_t obj_ptr, detail::mem_func_ptr func) {
-    constexpr std::size_t int_arg_count = 0;
+void callback_factory::patch_code(unsigned char *code, std::uint64_t obj_ptr, detail::mem_func_ptr func, std::size_t regs_used) {
+    if(debug && regs_used > 5)
+        throw std::logic_error("patch_code called with regs_used=" + std::to_string(regs_used));
 
-    unsigned char *code_ptr = std::copy_n(callback_template, 10 + 3 * int_arg_count, code);
-    std::copy(callback_template + 25, std::end(callback_template), code_ptr);
+    unsigned char *code_ptr = std::copy_n(callback_template, 10, code);
+    std::copy(callback_template + 25 - 3 * regs_used, std::end(callback_template), code_ptr);
 
     (std::uint64_t&)code[2] = resolve_func(obj_ptr, func);
-    (std::uint64_t&)code_ptr[2] = obj_ptr + func.obj_offset;
-    std::cout << "func: " << std::hex << *(std::uint64_t*)&code[2] << std::endl;
+    (std::uint64_t&)code[12 + 3 * regs_used] = obj_ptr + func.obj_offset;
 }
     
 
 std::uint64_t callback_factory::resolve_func(std::uint64_t obj_ptr, detail::mem_func_ptr func) {
-    std::cout << "obj_ptr " << std::hex << obj_ptr << std::endl;
-    std::cout << std::hex << func.func_ptr_or_vtable_off << '\t' << func.obj_offset << std::endl;
     if(func.func_ptr_or_vtable_off & 1) {
         if(debug && func.func_ptr_or_vtable_off % 8 != 1)
             throw std::logic_error("expected vtable offset % 8 == 1. " 
-                    + std::to_string(func.func_ptr_or_vtable_off));
+                    + ptr_to_str(func.func_ptr_or_vtable_off));
         std::uint64_t *vtable = *reinterpret_cast<std::uint64_t**>(obj_ptr + func.obj_offset);
         return vtable[func.func_ptr_or_vtable_off / 8];
     } else {

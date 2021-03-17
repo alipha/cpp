@@ -56,6 +56,24 @@ constexpr std::size_t registers_used_v = registers_used<Tuple>::value;
 
 
 
+template<typename MemFunc, typename Class, typename Tuple>
+struct is_mem_func_invocable {
+	static_assert(sizeof(Tuple) && false, "3rd template argument must be a std::tuple");
+};
+
+template<typename MemFunc, typename Class, typename... Args>
+struct is_mem_func_invocable<MemFunc, Class, std::tuple<Args...>> {
+    static constexpr bool value = std::is_invocable_v<MemFunc, Class, Args...>;
+};
+
+template<typename MemFunc, typename Class, typename Tuple>
+static constexpr bool is_mem_func_invocable_v = is_mem_func_invocable<MemFunc, Class, Tuple>::value;
+
+
+template<typename T>
+using object_type = std::remove_pointer_t<std::remove_reference_t<T>>;
+
+
 struct callback_block {
     unsigned char code[37];
     void (*deleter)(unsigned char*);
@@ -97,11 +115,11 @@ inline bool operator<(const callback_page &left, const callback_page &right) {
     return left.start < right.start;
 }
 
-inline bool operator<(const callback_page &left, void (*right)()) {
+inline bool operator<(const callback_page &left, std::uint64_t right) {
     return left.start < reinterpret_cast<void*>(right);
 }
 
-inline bool operator<(void (*left)(), const callback_page &right) {
+inline bool operator<(std::uint64_t left, const callback_page &right) {
     return reinterpret_cast<void*>(left) < right.start;
 }
 
