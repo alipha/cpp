@@ -14,6 +14,15 @@
         )) \
         (0, static_cast<liph::details::wrapper<type>*>(nullptr)))
 
+#define LIPH_HAS_TYPE_MEMBER(type, member) LIPH_COMPILES(type, std::declval<typename std::remove_cv_t<std::remove_reference_t<decltype(LIPH_DECLVAL(type))>>::member>())
+#define LIPH_HAS_MEMBER(type, member)      LIPH_COMPILES(type, &std::remove_cv_t<std::remove_reference_t<decltype(LIPH_DECLVAL(type))>>::member)
+
+#define LIPH_CONCEPT(name, expr) \
+    template<typename, typename = void> \
+    constexpr bool name = false; \
+    template<typename T> \
+    constexpr bool name<T, std::void_t<expr>> = true
+
 
 namespace liph {
 namespace details {
