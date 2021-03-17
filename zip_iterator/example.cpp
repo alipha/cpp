@@ -1,5 +1,4 @@
 #include "zip_iterator.hpp"
-#include "zip_iterator.hpp"
 
 #include <iostream>
 #include <list>
@@ -35,8 +34,7 @@ int main() {
 
     std::sort(range.begin(), range.end());
 
-    // TODO: const_zip_range
-    for(auto [v, w] : zip_range(vs, ws)) {
+    for(auto &&[v, w] : const_zip_range(vs, ws)) {
         std::cout << '(' << v << ", " << w << ") ";
     }
     std::cout << '\n';
@@ -53,10 +51,9 @@ int main() {
     }
     std::cout << '\n';
 
-    // TODO: cbegin, cend
-    for(auto it = range.begin(); it < range.end(); ++it) {
+    for(auto it = range.cbegin(); it < range.cend(); ++it) {
         auto [v, w] = *it;
-        std::cout << "from end: " << range.end() - it << "\t v + w = " << v + w << '\n'; // TODO: cend
+        std::cout << "from end: " << range.cend() - it << "\t v + w = " << v + w << '\n';
     }
     std::cout << '\n';
 //#endif

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <functional>
 #include <iterator>
+#include <new>
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
@@ -124,9 +125,9 @@ public:
     explicit zip_value(std::tuple<OtherTypes...> &&other) : values(std::tuple<Types...>(std::move(other))) {}
 
 
-    zip_value(const zip_value &other) : values() { assign(other.values); }
+    zip_value(const zip_value &other) : values(init(other.values)) {}
 
-    zip_value(zip_value &&other) : values() { assign(std::move(other.values)); }
+    zip_value(zip_value &&other) : values(init(std::move(other.values))) {}
     
 
     zip_value &operator=(const zip_value &other) { return assign(other.values); }
@@ -196,12 +197,26 @@ private:
     
     
     template<typename... Its>
-    zip_value &reset(const std::tuple<Types&...> &other) { 
-        values = std::monostate();
-        values = variant_type(other);
+    zip_value &reset(const std::tuple<Types&...> &other) {
+        if constexpr((std::is_const_v<Types> || ...)) {
+            using T = decltype(values);
+            values.~T();
+            new (&values) T(other);
+        } else {
+            values = std::monostate();
+            values = variant_type(other);
+        }
         return *this;
     }
 
+
+    template<typename Other>
+    static variant_type init(Other &&other) {
+        return std::visit(detail::overloaded {
+            [](std::monostate) { return variant_type(); },
+            [](auto &&o) { return variant_type(std::tuple<Types...>(std::forward<decltype(o)>(o))); }
+        }, std::forward<Other>(other));
+    }
 
     template<typename Other>
     zip_value &assign(Other &&other) {
@@ -281,7 +296,7 @@ struct zip_iterator {
     static_assert((sizeof(typename std::iterator_traits<Its>::iterator_category) && ...), "Not all template arguments are iterator types.");
     
     using iterator_category = decltype(detail::min_iterator_category<Its...>());
-    using value_type = zip_value<detail::default_if_void<typename std::iterator_traits<Its>::value_type, Its>...>;
+    using value_type = zip_value<detail::default_if_void<std::remove_reference_t<typename std::iterator_traits<Its>::reference>, Its>...>;
     using difference_type = std::ptrdiff_t;
     using reference = value_type&; 
     using pointer = value_type*;
