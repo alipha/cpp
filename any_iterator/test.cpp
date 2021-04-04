@@ -22,6 +22,14 @@ void sort_timing() {
 
     std::clock_t end = std::clock();
     std::cout << 1000.0 * (end - start) / CLOCKS_PER_SEC << std::endl;
+
+    int max = v[0];
+    for(int next : v) {
+        if(next < max) {
+            std::cout << "out of order" << std::endl;
+            return;
+        }
+    }
 }
 
 
@@ -49,16 +57,16 @@ int main() {
     rit4 = rit2;
     rit4 = rit + 3;
 
-    for(; rit != rit2; ++rit)
-        std::cout << *rit << std::endl;
+    //for(; rit != rit2; ++rit)
+    //    std::cout << *rit << std::endl;
 
-    //std::sort(rit, rit2);
+    std::sort(rit, rit2);
     for(int i = 1; i <= 4; ++i)
         std::cout << *(rit3 - i) << std::endl;
 
-/*
+
     sort_timing<std::vector<int>::iterator>();
     sort_timing<liph::any_random_access_iterator<int>>();
-    sort_timing<old::liph::any_random_access_iterator<int>>();*/
+    sort_timing<old::liph::any_random_access_iterator<int>>();
     return rit3 < rit4;
 }
