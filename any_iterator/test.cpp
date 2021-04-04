@@ -1,4 +1,5 @@
 #include "any_iterator.hpp"
+#include "old_any_iterator.hpp"
 #include <iostream>
 #include <vector>
 #include <algorithm>
@@ -43,12 +44,21 @@ int main() {
 
     liph::any_random_access_iterator<int> rit = v.begin(), rit2;
     rit2 = v.end();
+    auto rit3 = rit2;
+    liph::any_random_access_iterator<int> rit4;
+    rit4 = rit2;
+    rit4 = rit + 3;
 
-    std::sort(rit, rit2);
+    for(; rit != rit2; ++rit)
+        std::cout << *rit << std::endl;
+
+    //std::sort(rit, rit2);
     for(int i = 1; i <= 4; ++i)
-        std::cout << *(rit2 - i) << std::endl;
+        std::cout << *(rit3 - i) << std::endl;
 
-
+/*
     sort_timing<std::vector<int>::iterator>();
     sort_timing<liph::any_random_access_iterator<int>>();
+    sort_timing<old::liph::any_random_access_iterator<int>>();*/
+    return rit3 < rit4;
 }

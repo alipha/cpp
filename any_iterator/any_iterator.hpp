@@ -4,8 +4,10 @@
 #include <cstddef>
 #include <iterator>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 
 
 // TODO: std::hash, any_it_less, any_it_equal_to, constness
@@ -20,6 +22,56 @@ struct uninitialized_any_iterator : std::logic_error {
 
 namespace detail {
     
+
+template<typename T> struct in_place_t {};
+
+
+template<typename Base, std::size_t MaxSize = 3 * sizeof(void*)>
+struct sbo {
+    sbo() : ptr(nullptr) {}
+
+    template<typename Derived, typename... Args>
+    sbo(in_place_t<Derived> ip, Args&&... args) { construct(ip, std::forward<Args>(args)...); }
+
+    sbo(const sbo &) = delete;
+    sbo(sbo &&) = delete;
+    sbo &operator=(const sbo &) = delete;
+    sbo &operator=(sbo &&) = delete;
+
+    Base &operator*() const { return *ptr; }
+    Base *operator->() const { return ptr; }
+
+    template<typename Derived, typename... Args>
+    void replace(in_place_t<Derived> ip, Args&&... args) {
+        free();
+        ptr = nullptr;
+        construct(ip, std::forward<Args>(args)...);
+    }
+
+    ~sbo() { free(); }
+
+
+    alignas(alignof(std::max_align_t)) char buffer[MaxSize];
+    Base *ptr;
+
+private:
+    template<typename Derived, typename... Args>
+    void construct(in_place_t<Derived>, Args&&... args) {
+        if(sizeof(Derived) <= MaxSize)
+            ptr = new (buffer) Derived(std::forward<Args>(args)...);
+        else
+            ptr = new Derived(std::forward<Args>(args)...);
+    }
+
+    void free() {
+       void *vp = ptr;
+        if(vp && vp >= buffer && vp < &ptr)
+            ptr->~Base();
+        else
+            delete ptr;
+    }
+};
+
 
 template<typename ValueType>
 struct post_inc_proxy_base {
@@ -233,11 +285,13 @@ struct bidir_it_holder : bidir_it_holder_base<ValueType> {
 template<typename ValueType>
 struct rand_it_holder_base {
     virtual ~rand_it_holder_base() = default;
-    virtual std::unique_ptr<rand_it_holder_base<ValueType>> clone_as_rand() const = 0;
+    virtual void clone_as_rand(detail::sbo<rand_it_holder_base<ValueType>> &dest) const = 0;
     virtual std::unique_ptr<in_it_holder_base<ValueType>> clone_as_in() const = 0;
     virtual std::unique_ptr<out_it_holder_base<ValueType>> clone_as_out() const = 0;
     virtual std::unique_ptr<fwd_it_holder_base<ValueType>> clone_as_fwd() const = 0;
     virtual std::unique_ptr<bidir_it_holder_base<ValueType>> clone_as_bidir() const = 0;
+    
+    virtual void move_as_rand(detail::sbo<rand_it_holder_base<ValueType>> &dest) = 0;
     
     virtual bool equal_to(const rand_it_holder_base<ValueType> &other) const = 0;
     virtual bool less(const rand_it_holder_base<ValueType> &other) const = 0;
@@ -260,8 +314,8 @@ struct rand_it_holder : rand_it_holder_base<ValueType> {
     
     rand_it_holder(It it) : it(std::move(it)) {}
     
-    std::unique_ptr<rand_it_holder_base<ValueType>> clone_as_rand() const override { 
-        return std::unique_ptr<rand_it_holder_base<ValueType>>(new rand_it_holder<ValueType, It>(*this)); 
+    void clone_as_rand(detail::sbo<rand_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<rand_it_holder<ValueType, It>>{}, *this);
     }
     
     std::unique_ptr<in_it_holder_base<ValueType>> clone_as_in() const override { 
@@ -279,6 +333,11 @@ struct rand_it_holder : rand_it_holder_base<ValueType> {
     std::unique_ptr<bidir_it_holder_base<ValueType>> clone_as_bidir() const override { 
         return std::unique_ptr<bidir_it_holder_base<ValueType>>(new bidir_it_holder<ValueType, It>(it)); 
     }
+    
+    void move_as_rand(detail::sbo<rand_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<rand_it_holder<ValueType, It>>{}, std::move(*this));
+    }
+    
     
     bool equal_to(const rand_it_holder_base<ValueType> &other) const override { return it == static_cast<const rand_it_holder<ValueType, It>&>(other).it; }
     bool less(const rand_it_holder_base<ValueType> &other) const override { return it < static_cast<const rand_it_holder<ValueType, It>&>(other).it; }
@@ -298,8 +357,8 @@ struct rand_it_holder : rand_it_holder_base<ValueType> {
 
 template<typename ValueType>
 struct empty_it_holder : in_it_holder_base<ValueType>, out_it_holder_base<ValueType>, fwd_it_holder_base<ValueType>, bidir_it_holder_base<ValueType>, rand_it_holder_base<ValueType> {
-    std::unique_ptr<rand_it_holder_base<ValueType>> clone_as_rand() const override { 
-        return std::unique_ptr<rand_it_holder_base<ValueType>>(new empty_it_holder<ValueType>()); 
+    void clone_as_rand(detail::sbo<rand_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<empty_it_holder<ValueType>>{});
     }
 
     std::unique_ptr<in_it_holder_base<ValueType>> clone_as_in() const override { 
@@ -317,6 +376,11 @@ struct empty_it_holder : in_it_holder_base<ValueType>, out_it_holder_base<ValueT
     std::unique_ptr<bidir_it_holder_base<ValueType>> clone_as_bidir() const override {
         return std::unique_ptr<bidir_it_holder_base<ValueType>>(new empty_it_holder<ValueType>());
     }
+    
+    void move_as_rand(detail::sbo<rand_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<empty_it_holder<ValueType>>{});
+    }
+
     
     bool equal_to(const in_it_holder_base<ValueType> &) const override { throw uninitialized_any_iterator(); }
     bool equal_to(const fwd_it_holder_base<ValueType> &) const override { throw uninitialized_any_iterator(); }
@@ -707,28 +771,29 @@ struct any_random_access_iterator {
     using pointer = ValueType*;
     using reference = ValueType&;
 
-    any_random_access_iterator() : it(new detail::empty_it_holder<ValueType>) {}
+    any_random_access_iterator() : it(detail::in_place_t<detail::empty_it_holder<ValueType>>{}) {}
     
     template<typename It, typename = typename std::enable_if<!is_any_iterator<typename std::decay<It>::type>::value>::type>
-    any_random_access_iterator(It &&it) : it(new detail::rand_it_holder<ValueType, typename std::decay<It>::type>(std::forward<It>(it))) {}
+    any_random_access_iterator(It &&it) : it(detail::in_place_t<detail::rand_it_holder<ValueType, typename std::decay<It>::type>>{}, std::forward<It>(it)) {}
     
-    any_random_access_iterator(const any_random_access_iterator &other) : it(other.it->clone_as_rand()) {}
-    any_random_access_iterator(any_random_access_iterator &&other) : it(std::move(other.it)) {}
+    any_random_access_iterator(const any_random_access_iterator &other) : it() { other.it->clone_as_rand(it); }
+
+    any_random_access_iterator(any_random_access_iterator &&other) : it() { other.it->move_as_rand(other.it); }
     
     
     template<typename It, typename = typename std::enable_if<!is_any_iterator<typename std::decay<It>::type>::value>::type>
     any_random_access_iterator &operator=(It &&new_it) {
-        it.reset(new detail::rand_it_holder<ValueType, typename std::decay<It>::type>(std::forward<It>(new_it)));
+        it.replace(detail::in_place_t<detail::rand_it_holder<ValueType, typename std::decay<It>::type>>{}, std::forward<It>(new_it));
         return *this;
     }
     
     any_random_access_iterator &operator=(const any_random_access_iterator &other) {
-        it = other.it->clone_as_rand();
+        other.it->clone_as_rand(it);
         return *this;
     }
     
     any_random_access_iterator &operator=(any_random_access_iterator &&other) {
-        it = std::move(other.it);
+        other.it->move_as_rand(it);
         return *this;
     }
     
@@ -777,7 +842,7 @@ private:
     friend std::ptrdiff_t operator-(const any_random_access_iterator<T> &left, const any_random_access_iterator<T> &right);
 
 
-    std::unique_ptr<detail::rand_it_holder_base<ValueType>> it;
+    detail::sbo<detail::rand_it_holder_base<ValueType>> it;
 };
 
 
