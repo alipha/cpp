@@ -10,7 +10,10 @@
 #include <utility>
 
 
-// TODO: std::hash, any_it_less, any_it_equal_to, constness
+// TODO: std::hash, any_it_less, any_it_equal_to, constness 
+// TODO: disallow input_iterator/output_iterator and conversion to them if not copy/movable
+// TODO: sbo the input proxy
+
 
 namespace liph {
     
@@ -20,8 +23,52 @@ struct uninitialized_any_iterator : std::logic_error {
 };
 
 
+template<typename ValueType> struct any_input_iterator;
+template<typename ValueType> struct any_output_iterator;
+template<typename ValueType> struct any_forward_iterator;
+template<typename ValueType> struct any_bidirectional_iterator;
+template<typename ValueType> struct any_random_access_iterator;
+
+
+template<typename It>
+struct is_any_iterator { static constexpr bool value = false; };
+
+template<typename ValueType>
+struct is_any_iterator<any_input_iterator<ValueType>> { static constexpr bool value = true; };
+
+template<typename ValueType>
+struct is_any_iterator<any_output_iterator<ValueType>> { static constexpr bool value = true; };
+
+template<typename ValueType>
+struct is_any_iterator<any_forward_iterator<ValueType>> { static constexpr bool value = true; };
+
+template<typename ValueType>
+struct is_any_iterator<any_bidirectional_iterator<ValueType>> { static constexpr bool value = true; };
+
+template<typename ValueType>
+struct is_any_iterator<any_random_access_iterator<ValueType>> { static constexpr bool value = true; };
+
+
+
 namespace detail {
-    
+
+
+template<typename FromIt, typename ToIt, typename = void>
+struct is_compatible_it { static constexpr bool value = false; };
+
+template<typename FromIt, typename ToIt>
+struct is_compatible_it<FromIt, ToIt, typename std::enable_if<
+    is_any_iterator<FromIt>::value 
+    && std::is_same<typename FromIt::value_type, typename ToIt::value_type>::value
+    && (std::is_base_of<typename ToIt::iterator_category, typename FromIt::iterator_category>::value
+        || (!std::is_same<typename FromIt::iterator_category, std::input_iterator_tag>::value 
+            && std::is_same<typename ToIt::iterator_category, std::output_iterator_tag>::value)
+    )
+>::type> {
+    static constexpr bool value = true;
+};
+
+
 
 template<typename T> struct in_place_t {};
 
@@ -135,7 +182,8 @@ template<typename ValueType>
 struct in_it_holder_base {
     virtual ~in_it_holder_base() = default;
     
-    virtual std::unique_ptr<in_it_holder_base<ValueType>> clone_as_in() const = 0;
+    virtual void clone_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) const = 0;
+    virtual void move_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) = 0;
     
     virtual bool equal_to(const in_it_holder_base<ValueType> &other) const = 0;
     
@@ -154,8 +202,12 @@ struct in_it_holder : in_it_holder_base<ValueType> {
     
     in_it_holder(It it) : it(std::move(it)) {}
     
-    std::unique_ptr<in_it_holder_base<ValueType>> clone_as_in() const override {
-        return std::unique_ptr<in_it_holder_base<ValueType>>(new in_it_holder<ValueType, It>(*this));
+    void clone_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<in_it_holder<ValueType, It>>{}, it);
+    }
+
+    void move_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<in_it_holder<ValueType, It>>{}, std::move(it));
     }
     
     bool equal_to(const in_it_holder_base<ValueType> &other) const override { return it == static_cast<const in_it_holder<ValueType, It>&>(other).it; }
@@ -174,7 +226,8 @@ template<typename ValueType>
 struct out_it_holder_base {
     virtual ~out_it_holder_base() = default;
     
-    virtual std::unique_ptr<out_it_holder_base<ValueType>> clone_as_out() const = 0;
+    virtual void clone_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) const = 0;
+    virtual void move_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) = 0;
     
     virtual void next() = 0;
     
@@ -189,10 +242,14 @@ struct out_it_holder : out_it_holder_base<ValueType> {
     
     out_it_holder(It it) : it(std::move(it)) {}
     
-    std::unique_ptr<out_it_holder_base<ValueType>> clone_as_out() const override { 
-        return std::unique_ptr<out_it_holder_base<ValueType>>(new out_it_holder<ValueType, It>(*this));
+    void clone_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<out_it_holder<ValueType, It>>{}, it);
     }
-    
+
+    void move_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<out_it_holder<ValueType, It>>{}, std::move(it));
+    }
+
     void next() override { ++it; }
     
     void set(ValueType value) const override { *it = std::move(value); }
@@ -205,9 +262,13 @@ template<typename ValueType>
 struct fwd_it_holder_base {
     virtual ~fwd_it_holder_base() = default;
     
-    virtual std::unique_ptr<fwd_it_holder_base<ValueType>> clone_as_fwd() const = 0;
-    virtual std::unique_ptr<in_it_holder_base<ValueType>> clone_as_in() const = 0;
-    virtual std::unique_ptr<out_it_holder_base<ValueType>> clone_as_out() const = 0;
+    virtual void clone_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) const = 0;
+    virtual void clone_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) const = 0;
+    virtual void clone_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) const = 0;
+    
+    virtual void move_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) = 0;
+    virtual void move_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) = 0;
+    virtual void move_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) = 0;
     
     virtual bool equal_to(const fwd_it_holder_base<ValueType> &other) const = 0;
     
@@ -224,17 +285,31 @@ struct fwd_it_holder : fwd_it_holder_base<ValueType> {
     
     fwd_it_holder(It it) : it(std::move(it)) {}
     
-    std::unique_ptr<fwd_it_holder_base<ValueType>> clone_as_fwd() const override { 
-        return std::unique_ptr<fwd_it_holder_base<ValueType>>(new fwd_it_holder<ValueType, It>(*this)); 
-    }
-    
-    std::unique_ptr<in_it_holder_base<ValueType>> clone_as_in() const override { 
-        return std::unique_ptr<in_it_holder_base<ValueType>>(new in_it_holder<ValueType, It>(it));
+    void clone_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<in_it_holder<ValueType, It>>{}, it);
     }
 
-    std::unique_ptr<out_it_holder_base<ValueType>> clone_as_out() const override { 
-        return std::unique_ptr<out_it_holder_base<ValueType>>(new out_it_holder<ValueType, It>(it));  // TODO: check if copy/move constructible and throw an exception if not
+    void clone_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<out_it_holder<ValueType, It>>{}, it);
     }
+
+    void clone_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<fwd_it_holder<ValueType, It>>{}, it);
+    }
+
+        
+    void move_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<in_it_holder<ValueType, It>>{}, std::move(it));
+    }
+
+    void move_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<out_it_holder<ValueType, It>>{}, std::move(it));
+    }
+
+    void move_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<fwd_it_holder<ValueType, It>>{}, std::move(it));
+    }
+
     
     bool equal_to(const fwd_it_holder_base<ValueType> &other) const override { return it == static_cast<const fwd_it_holder<ValueType, It>&>(other).it; }
     
@@ -249,10 +324,15 @@ struct fwd_it_holder : fwd_it_holder_base<ValueType> {
 template<typename ValueType>
 struct bidir_it_holder_base {
     virtual ~bidir_it_holder_base() = default;
-    virtual std::unique_ptr<bidir_it_holder_base<ValueType>> clone_as_bidir() const = 0;
-    virtual std::unique_ptr<in_it_holder_base<ValueType>> clone_as_in() const = 0;
-    virtual std::unique_ptr<out_it_holder_base<ValueType>> clone_as_out() const = 0;
-    virtual std::unique_ptr<fwd_it_holder_base<ValueType>> clone_as_fwd() const = 0;
+    virtual void clone_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) const = 0;
+    virtual void clone_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) const = 0;
+    virtual void clone_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) const = 0;
+    virtual void clone_as_bidir(detail::sbo<bidir_it_holder_base<ValueType>> &dest) const = 0;
+    
+    virtual void move_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) = 0;
+    virtual void move_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) = 0;
+    virtual void move_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) = 0;
+    virtual void move_as_bidir(detail::sbo<bidir_it_holder_base<ValueType>> &dest) = 0;
     
     virtual bool equal_to(const bidir_it_holder_base<ValueType> &other) const = 0;
     
@@ -270,21 +350,39 @@ struct bidir_it_holder : bidir_it_holder_base<ValueType> {
     
     bidir_it_holder(It it) : it(std::move(it)) {}
     
-    std::unique_ptr<bidir_it_holder_base<ValueType>> clone_as_bidir() const override { 
-        return std::unique_ptr<bidir_it_holder_base<ValueType>>(new bidir_it_holder<ValueType, It>(*this));
-    }
-    
-    std::unique_ptr<in_it_holder_base<ValueType>> clone_as_in() const override { 
-        return std::unique_ptr<in_it_holder_base<ValueType>>(new in_it_holder<ValueType, It>(it)); 
+    void clone_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<in_it_holder<ValueType, It>>{}, it);
     }
 
-    std::unique_ptr<out_it_holder_base<ValueType>> clone_as_out() const override { 
-        return std::unique_ptr<out_it_holder_base<ValueType>>(new out_it_holder<ValueType, It>(it));  // TODO: check if copy/move constructible and throw an exception if not
+    void clone_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<out_it_holder<ValueType, It>>{}, it);
     }
 
-    std::unique_ptr<fwd_it_holder_base<ValueType>> clone_as_fwd() const override { 
-        return std::unique_ptr<fwd_it_holder_base<ValueType>>(new fwd_it_holder<ValueType, It>(it)); 
+    void clone_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<fwd_it_holder<ValueType, It>>{}, it);
     }
+
+    void clone_as_bidir(detail::sbo<bidir_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<bidir_it_holder<ValueType, It>>{}, it);
+    }
+
+        
+    void move_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<in_it_holder<ValueType, It>>{}, std::move(it));
+    }
+
+    void move_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<out_it_holder<ValueType, It>>{}, std::move(it));
+    }
+
+    void move_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<fwd_it_holder<ValueType, It>>{}, std::move(it));
+    }
+
+    void move_as_bidir(detail::sbo<bidir_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<bidir_it_holder<ValueType, It>>{}, std::move(it));
+    }
+
     
     bool equal_to(const bidir_it_holder_base<ValueType> &other) const override { return it == static_cast<const bidir_it_holder<ValueType, It>&>(other).it; }
     
@@ -300,12 +398,16 @@ struct bidir_it_holder : bidir_it_holder_base<ValueType> {
 template<typename ValueType>
 struct rand_it_holder_base {
     virtual ~rand_it_holder_base() = default;
+    virtual void clone_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) const = 0;
+    virtual void clone_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) const = 0;
+    virtual void clone_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) const = 0;
+    virtual void clone_as_bidir(detail::sbo<bidir_it_holder_base<ValueType>> &dest) const = 0;
     virtual void clone_as_rand(detail::sbo<rand_it_holder_base<ValueType>> &dest) const = 0;
-    virtual std::unique_ptr<in_it_holder_base<ValueType>> clone_as_in() const = 0;
-    virtual std::unique_ptr<out_it_holder_base<ValueType>> clone_as_out() const = 0;
-    virtual std::unique_ptr<fwd_it_holder_base<ValueType>> clone_as_fwd() const = 0;
-    virtual std::unique_ptr<bidir_it_holder_base<ValueType>> clone_as_bidir() const = 0;
     
+    virtual void move_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) = 0;
+    virtual void move_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) = 0;
+    virtual void move_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) = 0;
+    virtual void move_as_bidir(detail::sbo<bidir_it_holder_base<ValueType>> &dest) = 0;
     virtual void move_as_rand(detail::sbo<rand_it_holder_base<ValueType>> &dest) = 0;
     
     virtual bool equal_to(const rand_it_holder_base<ValueType> &other) const = 0;
@@ -329,30 +431,47 @@ struct rand_it_holder : rand_it_holder_base<ValueType> {
     
     rand_it_holder(It it) : it(std::move(it)) {}
     
+    void clone_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<in_it_holder<ValueType, It>>{}, it);
+    }
+
+    void clone_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<out_it_holder<ValueType, It>>{}, it);
+    }
+
+    void clone_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<fwd_it_holder<ValueType, It>>{}, it);
+    }
+
+    void clone_as_bidir(detail::sbo<bidir_it_holder_base<ValueType>> &dest) const override {
+        dest.replace(detail::in_place_t<bidir_it_holder<ValueType, It>>{}, it);
+    }
+
     void clone_as_rand(detail::sbo<rand_it_holder_base<ValueType>> &dest) const override {
-        dest.replace(detail::in_place_t<rand_it_holder<ValueType, It>>{}, *this);
-    }
-    
-    std::unique_ptr<in_it_holder_base<ValueType>> clone_as_in() const override { 
-        return std::unique_ptr<in_it_holder_base<ValueType>>(new in_it_holder<ValueType, It>(it)); 
+        dest.replace(detail::in_place_t<rand_it_holder<ValueType, It>>{}, it);
     }
 
-    std::unique_ptr<out_it_holder_base<ValueType>> clone_as_out() const override { 
-        return std::unique_ptr<out_it_holder_base<ValueType>>(new out_it_holder<ValueType, It>(it));  // TODO: check if copy/move constructible and throw an exception if not
+        
+    void move_as_in(detail::sbo<in_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<in_it_holder<ValueType, It>>{}, std::move(it));
     }
 
-    std::unique_ptr<fwd_it_holder_base<ValueType>> clone_as_fwd() const override { 
-        return std::unique_ptr<fwd_it_holder_base<ValueType>>(new fwd_it_holder<ValueType, It>(it)); 
+    void move_as_out(detail::sbo<out_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<out_it_holder<ValueType, It>>{}, std::move(it));
     }
 
-    std::unique_ptr<bidir_it_holder_base<ValueType>> clone_as_bidir() const override { 
-        return std::unique_ptr<bidir_it_holder_base<ValueType>>(new bidir_it_holder<ValueType, It>(it)); 
+    void move_as_fwd(detail::sbo<fwd_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<fwd_it_holder<ValueType, It>>{}, std::move(it));
     }
-    
+
+    void move_as_bidir(detail::sbo<bidir_it_holder_base<ValueType>> &dest) override {
+        dest.replace(detail::in_place_t<bidir_it_holder<ValueType, It>>{}, std::move(it));
+    }
+
     void move_as_rand(detail::sbo<rand_it_holder_base<ValueType>> &dest) override {
-        dest.replace(detail::in_place_t<rand_it_holder<ValueType, It>>{}, std::move(*this));
+        dest.replace(detail::in_place_t<rand_it_holder<ValueType, It>>{}, std::move(it));
     }
-    
+
     
     bool equal_to(const rand_it_holder_base<ValueType> &other) const override { return it == static_cast<const rand_it_holder<ValueType, It>&>(other).it; }
     bool less(const rand_it_holder_base<ValueType> &other) const override { return it < static_cast<const rand_it_holder<ValueType, It>&>(other).it; }
@@ -464,31 +583,6 @@ struct empty_rand_it_holder : rand_it_holder_base<ValueType> {
 
 } // namespace detail
 
-template<typename ValueType> struct any_input_iterator;
-template<typename ValueType> struct any_output_iterator;
-template<typename ValueType> struct any_forward_iterator;
-template<typename ValueType> struct any_bidirectional_iterator;
-template<typename ValueType> struct any_random_access_iterator;
-
-
-template<typename It>
-struct is_any_iterator { static constexpr bool value = false; };
-
-template<typename ValueType>
-struct is_any_iterator<any_input_iterator<ValueType>> { static constexpr bool value = true; };
-
-template<typename ValueType>
-struct is_any_iterator<any_output_iterator<ValueType>> { static constexpr bool value = true; };
-
-template<typename ValueType>
-struct is_any_iterator<any_forward_iterator<ValueType>> { static constexpr bool value = true; };
-
-template<typename ValueType>
-struct is_any_iterator<any_bidirectional_iterator<ValueType>> { static constexpr bool value = true; };
-
-template<typename ValueType>
-struct is_any_iterator<any_random_access_iterator<ValueType>> { static constexpr bool value = true; };
-
 
 
 template<typename ValueType>
@@ -501,14 +595,18 @@ struct any_input_iterator {
 
     any_input_iterator() : it(new detail::empty_it_holder<ValueType>) {}
     
-    template<typename It, typename = typename std::enable_if<!is_any_iterator<typename std::decay<It>::type>::value>::type>
+    template<typename It, typename = typename std::enable_if<
+            !detail::is_compatible_it<typename std::decay<It>::type, any_forward_iterator<ValueType>>::value
+        >::type>
     any_input_iterator(It &&it) : it(new detail::in_it_holder<ValueType, typename std::decay<It>::type>(std::forward<It>(it))) {}
     
     any_input_iterator(const any_input_iterator &other) : it(other.it->clone_as_in()) {}
     any_input_iterator(any_input_iterator &&other) : it(std::move(other.it)) {}
     
     
-    template<typename It, typename = typename std::enable_if<!is_any_iterator<typename std::decay<It>::type>::value>::type>
+    template<typename It, typename = typename std::enable_if<
+            !detail::is_compatible_it<typename std::decay<It>::type, any_forward_iterator<ValueType>>::value
+        >::type>
     any_input_iterator &operator=(It &&new_it) {
         it.reset(new detail::in_it_holder<ValueType, typename std::decay<It>::type>(std::forward<It>(new_it)));
         return *this;
@@ -525,28 +623,27 @@ struct any_input_iterator {
     }
     
     
-    any_input_iterator(const any_forward_iterator<ValueType> &other) : it(other.it->clone_as_in()) {}
-    
-    any_input_iterator &operator=(const any_forward_iterator<ValueType> &other) {
-        it = other.it->clone_as_in();
+    template<typename AnyIt, typename = typename std::enable_if<
+            detail::is_compatible_it<typename std::decay<AnyIt>::type, any_input_iterator<ValueType>>::value
+        >::type>
+    any_input_iterator(AnyIt &&other) : it() { 
+        if(std::is_reference<AnyIt>::value)
+            other.it->clone_as_in(it); 
+        else
+            other.it->move_as_in(it);
+    }
+
+    template<typename AnyIt, typename = typename std::enable_if<
+            detail::is_compatible_it<typename std::decay<AnyIt>::type, any_input_iterator<ValueType>>::value
+        >::type>
+    any_input_iterator &operator=(AnyIt &&other) { 
+        if(std::is_reference<AnyIt>::value)
+            other.it->clone_as_in(it); 
+        else
+            other.it->move_as_in(it);
         return *this;
     }
-        
     
-    any_input_iterator(const any_bidirectional_iterator<ValueType> &other) : it(other.it->clone_as_in()) {}
-    
-    any_input_iterator &operator=(const any_bidirectional_iterator<ValueType> &other) {
-        it = other.it->clone_as_in();
-        return *this;
-    }
-    
-    
-    any_input_iterator(const any_random_access_iterator<ValueType> &other) : it(other.it->clone_as_in()) {}
-    
-    any_input_iterator &operator=(const any_random_access_iterator<ValueType> &other) {
-        it = other.it->clone_as_in();
-        return *this;
-    }
     
     ValueType operator*() const { return it->get_value(); }
     detail::value_wrapper<ValueType> operator->() const { return it->get_value(); }
@@ -559,7 +656,7 @@ private:
     template<typename T>
     friend bool operator==(const any_input_iterator<T> &left, const any_input_iterator<T> &right);
 
-    std::unique_ptr<detail::in_it_holder_base<ValueType>> it;
+    detail::sbo<detail::in_it_holder_base<ValueType>> it;
 };
 
 
@@ -585,7 +682,9 @@ struct any_output_iterator {
 
     any_output_iterator() : it(new detail::empty_it_holder<ValueType>) {}
     
-    template<typename It, typename = typename std::enable_if<!is_any_iterator<typename std::decay<It>::type>::value>::type>
+    template<typename It, typename = typename std::enable_if<
+            !detail::is_compatible_it<typename std::decay<It>::type, any_forward_iterator<ValueType>>::value
+        >::type>
     any_output_iterator(It &&it) : it(new detail::in_it_holder<ValueType, typename std::decay<It>::type>(std::forward<It>(it))) {}
     
     any_output_iterator(const any_output_iterator &other) : it(other.it->clone_as_out()) {}
@@ -593,8 +692,7 @@ struct any_output_iterator {
     
     
     template<typename It, typename = typename std::enable_if<
-            !is_any_iterator<typename std::decay<It>::type>::value 
-            && !std::is_convertible<typename std::decay<It>::type, ValueType>::value 
+            !detail::is_compatible_it<typename std::decay<It>::type, any_forward_iterator<ValueType>>::value
         >::type>
     any_output_iterator &operator=(It &&new_it) {
         it.reset(new detail::in_it_holder<ValueType, typename std::decay<It>::type>(std::forward<It>(new_it)));
@@ -623,26 +721,24 @@ struct any_output_iterator {
     }
     
     
-    any_output_iterator(const any_forward_iterator<ValueType> &other) : it(other.it->clone_as_out()) {}
-    
-    any_output_iterator &operator=(const any_forward_iterator<ValueType> &other) {
-        it = other.it->clone_as_out();
-        return *this;
+    template<typename AnyIt, typename = typename std::enable_if<
+            detail::is_compatible_it<typename std::decay<AnyIt>::type, any_output_iterator<ValueType>>::value
+        >::type>
+    any_output_iterator(AnyIt &&other) : it() { 
+        if(std::is_reference<AnyIt>::value)
+            other.it->clone_as_out(it); 
+        else
+            other.it->move_as_out(it);
     }
-        
-    
-    any_output_iterator(const any_bidirectional_iterator<ValueType> &other) : it(other.it->clone_as_out()) {}
-    
-    any_output_iterator &operator=(const any_bidirectional_iterator<ValueType> &other) {
-        it = other.it->clone_as_out();
-        return *this;
-    }
-    
-    
-    any_output_iterator(const any_random_access_iterator<ValueType> &other) : it(other.it->clone_as_out()) {}
-    
-    any_output_iterator &operator=(const any_random_access_iterator<ValueType> &other) {
-        it = other.it->clone_as_out();
+
+    template<typename AnyIt, typename = typename std::enable_if<
+            detail::is_compatible_it<typename std::decay<AnyIt>::type, any_output_iterator<ValueType>>::value
+        >::type>
+    any_output_iterator &operator=(AnyIt &&other) { 
+        if(std::is_reference<AnyIt>::value)
+            other.it->clone_as_out(it); 
+        else
+            other.it->move_as_out(it);
         return *this;
     }
     
@@ -651,7 +747,7 @@ struct any_output_iterator {
     any_output_iterator &operator++() { return *this; }
 
 private:
-    std::unique_ptr<detail::out_it_holder_base<ValueType>> it;
+    detail::sbo<detail::out_it_holder_base<ValueType>> it;
 };
 
 
@@ -664,44 +760,55 @@ struct any_forward_iterator {
     using pointer = ValueType*;
     using reference = ValueType&;
 
-    any_forward_iterator() : it(new detail::empty_it_holder<ValueType>) {}
+    any_forward_iterator() : it(detail::in_place_t<detail::empty_fwd_it_holder<ValueType>>{}) {}
     
-    template<typename It, typename = typename std::enable_if<!is_any_iterator<typename std::decay<It>::type>::value>::type>
-    any_forward_iterator(It &&it) : it(new detail::fwd_it_holder<ValueType, typename std::decay<It>::type>(std::forward<It>(it))) {}
+    template<typename It, typename = typename std::enable_if<
+            !detail::is_compatible_it<typename std::decay<It>::type, any_forward_iterator<ValueType>>::value
+        >::type>
+    any_forward_iterator(It &&it) : it(detail::in_place_t<detail::fwd_it_holder<ValueType, typename std::decay<It>::type>>{}, std::forward<It>(it)) {}
     
-    any_forward_iterator(const any_forward_iterator &other) : it(other.it->clone_as_fwd()) {}
-    any_forward_iterator(any_forward_iterator &&other) : it(std::move(other.it)) {}
+    any_forward_iterator(const any_forward_iterator &other) : it() { other.it->clone_as_fwd(it); }
+
+    any_forward_iterator(any_forward_iterator &&other) : it() { other.it->move_as_fwd(it); }
     
     
-    template<typename It, typename = typename std::enable_if<!is_any_iterator<typename std::decay<It>::type>::value>::type>
+    template<typename It, typename = typename std::enable_if<
+            !detail::is_compatible_it<typename std::decay<It>::type, any_forward_iterator<ValueType>>::value
+        >::type>
     any_forward_iterator &operator=(It &&new_it) {
-        it.reset(new detail::fwd_it_holder<ValueType, typename std::decay<It>::type>(std::forward<It>(new_it)));
+        it.replace(detail::in_place_t<detail::fwd_it_holder<ValueType, typename std::decay<It>::type>>{}, std::forward<It>(new_it));
         return *this;
     }
     
     any_forward_iterator &operator=(const any_forward_iterator &other) {
-        it = other.it->clone_as_fwd();
+        other.it->clone_as_fwd(it);
         return *this;
     }
     
     any_forward_iterator &operator=(any_forward_iterator &&other) {
-        it = std::move(other.it);
+        other.it->move_as_fwd(it);
         return *this;
     }
     
     
-    any_forward_iterator(const any_bidirectional_iterator<ValueType> &other) : it(other.it->clone_as_fwd()) {}
-    
-    any_forward_iterator &operator=(const any_bidirectional_iterator<ValueType> &other) {
-        it = other.it->clone_as_fwd();
-        return *this;
+    template<typename AnyIt, typename = typename std::enable_if<
+            detail::is_compatible_it<typename std::decay<AnyIt>::type, any_forward_iterator<ValueType>>::value
+        >::type>
+    any_forward_iterator(AnyIt &&other) : it() { 
+        if(std::is_reference<AnyIt>::value)
+            other.it->clone_as_fwd(it); 
+        else
+            other.it->move_as_fwd(it);
     }
-    
-    
-    any_forward_iterator(const any_random_access_iterator<ValueType> &other) : it(other.it->clone_as_fwd()) {}
-    
-    any_forward_iterator &operator=(const any_random_access_iterator<ValueType> &other) {
-        it = other.it->clone_as_fwd();
+
+    template<typename AnyIt, typename = typename std::enable_if<
+            detail::is_compatible_it<typename std::decay<AnyIt>::type, any_forward_iterator<ValueType>>::value
+        >::type>
+    any_forward_iterator &operator=(AnyIt &&other) { 
+        if(std::is_reference<AnyIt>::value)
+            other.it->clone_as_fwd(it); 
+        else
+            other.it->move_as_fwd(it);
         return *this;
     }
     
@@ -722,7 +829,7 @@ private:
     template<typename T>
     friend bool operator==(const any_forward_iterator<T> &left, const any_forward_iterator<T> &right);
 
-    std::unique_ptr<detail::fwd_it_holder_base<ValueType>> it;
+    detail::sbo<detail::fwd_it_holder_base<ValueType>> it;
 };
 
 
@@ -746,36 +853,48 @@ struct any_bidirectional_iterator {
     using pointer = ValueType*;
     using reference = ValueType&;
 
-    any_bidirectional_iterator() : it(new detail::empty_it_holder<ValueType>) {}
+    any_bidirectional_iterator() : it(detail::in_place_t<detail::empty_bidir_it_holder<ValueType>>{}) {}
     
-    template<typename It, typename = typename std::enable_if<!is_any_iterator<typename std::decay<It>::type>::value>::type>
-    any_bidirectional_iterator(It &&it) : it(new detail::bidir_it_holder<ValueType, typename std::decay<It>::type>(std::forward<It>(it))) {}
+    template<typename It, typename = typename std::enable_if<
+            !detail::is_compatible_it<typename std::decay<It>::type, any_forward_iterator<ValueType>>::value
+        >::type>
+    any_bidirectional_iterator(It &&it) : it(detail::in_place_t<detail::bidir_it_holder<ValueType, typename std::decay<It>::type>>{}, std::forward<It>(it)) {}
     
-    any_bidirectional_iterator(const any_bidirectional_iterator &other) : it(other.it->clone_as_bidir()) {}
-    any_bidirectional_iterator(any_bidirectional_iterator &&other) : it(std::move(other.it)) {}
+    any_bidirectional_iterator(const any_bidirectional_iterator &other) : it() { other.it->clone_as_bidir(it); }
+
+    any_bidirectional_iterator(any_bidirectional_iterator &&other) : it() { other.it->move_as_bidir(it); }
     
     
-    template<typename It, typename = typename std::enable_if<!is_any_iterator<typename std::decay<It>::type>::value>::type>
+    template<typename It, typename = typename std::enable_if<
+            !detail::is_compatible_it<typename std::decay<It>::type, any_forward_iterator<ValueType>>::value
+        >::type>
     any_bidirectional_iterator &operator=(It &&new_it) {
-        it.reset(new detail::bidir_it_holder<ValueType, typename std::decay<It>::type>(std::forward<It>(new_it)));
+        it.replace(detail::in_place_t<detail::bidir_it_holder<ValueType, typename std::decay<It>::type>>{}, std::forward<It>(new_it));
         return *this;
     }
     
     any_bidirectional_iterator &operator=(const any_bidirectional_iterator &other) {
-        it = other.it->clone_as_bidir();
+        other.it->clone_as_bidir(it);
         return *this;
     }
     
     any_bidirectional_iterator &operator=(any_bidirectional_iterator &&other) {
-        it = std::move(other.it);
+        other.it->move_as_bidir(it);
         return *this;
     }
     
     
-    any_bidirectional_iterator(const any_random_access_iterator<ValueType> &other) : it(other.it->clone_as_bidir()) {}
+    any_bidirectional_iterator(const any_random_access_iterator<ValueType> &other) : it() { other.it->clone_as_bidir(it); }
+    
+    any_bidirectional_iterator(any_random_access_iterator<ValueType> &&other) : it() { other.it->move_as_bidir(it); }
     
     any_bidirectional_iterator &operator=(const any_random_access_iterator<ValueType> &other) {
-        it = other.it->clone_as_bidir();
+        other.it->clone_as_bidir(it);
+        return *this;
+    }
+    
+    any_bidirectional_iterator &operator=(any_random_access_iterator<ValueType> &&other) {
+        other.it->move_as_bidir(it);
         return *this;
     }
     
@@ -804,7 +923,7 @@ private:
     template<typename T>
     friend bool operator==(const any_bidirectional_iterator<T> &left, const any_bidirectional_iterator<T> &right);
 
-    std::unique_ptr<detail::bidir_it_holder_base<ValueType>> it;
+    detail::sbo<detail::bidir_it_holder_base<ValueType>> it;
 };
 
 
@@ -830,7 +949,9 @@ struct any_random_access_iterator {
 
     any_random_access_iterator() : it(detail::in_place_t<detail::empty_rand_it_holder<ValueType>>{}) {}
     
-    template<typename It, typename = typename std::enable_if<!is_any_iterator<typename std::decay<It>::type>::value>::type>
+    template<typename It, typename = typename std::enable_if<
+            !detail::is_compatible_it<typename std::decay<It>::type, any_forward_iterator<ValueType>>::value
+        >::type>
     any_random_access_iterator(It &&it) : it(detail::in_place_t<detail::rand_it_holder<ValueType, typename std::decay<It>::type>>{}, std::forward<It>(it)) {}
     
     any_random_access_iterator(const any_random_access_iterator &other) : it() { other.it->clone_as_rand(it); }
@@ -838,7 +959,9 @@ struct any_random_access_iterator {
     any_random_access_iterator(any_random_access_iterator &&other) : it() { other.it->move_as_rand(it); }
     
     
-    template<typename It, typename = typename std::enable_if<!is_any_iterator<typename std::decay<It>::type>::value>::type>
+    template<typename It, typename = typename std::enable_if<
+            !detail::is_compatible_it<typename std::decay<It>::type, any_forward_iterator<ValueType>>::value
+        >::type>
     any_random_access_iterator &operator=(It &&new_it) {
         it.replace(detail::in_place_t<detail::rand_it_holder<ValueType, typename std::decay<It>::type>>{}, std::forward<It>(new_it));
         return *this;

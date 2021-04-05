@@ -37,6 +37,8 @@ void sort_timing() {
 int main() {
     std::srand(std::time(nullptr));
 
+    std::cout << sizeof(liph::any_random_access_iterator<int>) << std::endl;
+
     std::vector<int> v{5, 2, 10, 15};
     liph::any_input_iterator<int> it, it2 = v.begin(), it3;
     it = it2;
