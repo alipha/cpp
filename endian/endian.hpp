@@ -26,6 +26,11 @@ Char *uint64_to_be(std::uint64_t src, Char *dest) {
 }
 
 template<typename Char>
+Char *int64_to_be(std::int64_t src, Char *dest) {
+    return uint64_to_be(static_cast<std::uint64_t>(src), dest);
+}
+
+template<typename Char>
 Char *uint64_to_le(std::uint64_t src, Char *dest) {
     static_assert(sizeof(Char) == 1, "Char must be a byte-sized type");
     dest[7] = static_cast<Char>(static_cast<std::uint8_t>(src >> 56));
@@ -37,6 +42,11 @@ Char *uint64_to_le(std::uint64_t src, Char *dest) {
     dest[1] = static_cast<Char>(static_cast<std::uint8_t>(src >> 8));
     dest[0] = static_cast<Char>(static_cast<std::uint8_t>(src));
     return dest;
+}
+
+template<typename Char>
+Char *int64_to_le(std::int64_t src, Char *dest) {
+    return uint64_to_le(static_cast<std::uint64_t>(src), dest);
 }
 
 template<typename Char>
@@ -55,6 +65,11 @@ std::uint64_t be_to_uint64(const Char *src) {
 }
 
 template<typename Char>
+std::int64_t be_to_int64(const Char *src) {
+    return static_cast<std::int64_t>(be_to_uint64(src));
+}
+
+template<typename Char>
 std::uint64_t le_to_uint64(const Char *src) {
     static_assert(sizeof(Char) == 1, "Char must be a byte-sized type");
     return static_cast<std::uint64_t>(
@@ -69,6 +84,11 @@ std::uint64_t le_to_uint64(const Char *src) {
     );
 }
 
+template<typename Char>
+std::int64_t le_to_int64(const Char *src) {
+    return static_cast<std::int64_t>(le_to_uint64(src));
+}
+
 
 template<typename Char>
 Char *uint32_to_be(std::uint32_t src, Char *dest) {
@@ -81,6 +101,11 @@ Char *uint32_to_be(std::uint32_t src, Char *dest) {
 }
 
 template<typename Char>
+Char *int32_to_be(std::int32_t src, Char *dest) {
+    return uint32_to_be(static_cast<std::uint32_t>(src), dest);
+}
+
+template<typename Char>
 Char *uint32_to_le(std::uint32_t src, Char *dest) {
     static_assert(sizeof(Char) == 1, "Char must be a byte-sized type");
     dest[3] = static_cast<Char>(static_cast<std::uint8_t>(src >> 24));
@@ -88,6 +113,11 @@ Char *uint32_to_le(std::uint32_t src, Char *dest) {
     dest[1] = static_cast<Char>(static_cast<std::uint8_t>(src >> 8));
     dest[0] = static_cast<Char>(static_cast<std::uint8_t>(src));
     return dest;
+}
+
+template<typename Char>
+Char *int32_to_le(std::int32_t src, Char *dest) {
+    return uint32_to_le(static_cast<std::uint32_t>(src), dest);
 }
 
 template<typename Char>
@@ -102,6 +132,11 @@ std::uint32_t be_to_uint32(const Char *src) {
 }
 
 template<typename Char>
+std::int32_t be_to_int32(const Char *src) {
+    return static_cast<std::int32_t>(be_to_uint32(src));
+}
+
+template<typename Char>
 std::uint32_t le_to_uint32(const Char *src) {
     static_assert(sizeof(Char) == 1, "Char must be a byte-sized type");
     return static_cast<std::uint32_t>(
@@ -110,6 +145,11 @@ std::uint32_t le_to_uint32(const Char *src) {
         | static_cast<std::uint32_t>(static_cast<std::uint8_t>(src[1])) << 8
         | static_cast<std::uint32_t>(static_cast<std::uint8_t>(src[0]))
     );
+}
+
+template<typename Char>
+std::int32_t le_to_int32(const Char *src) {
+    return static_cast<std::int32_t>(le_to_uint32(src));
 }
 
 
@@ -122,11 +162,21 @@ Char *uint16_to_be(std::uint16_t src, Char *dest) {
 }
 
 template<typename Char>
+Char *int16_to_be(std::int16_t src, Char *dest) {
+    return uint16_to_be(static_cast<std::uint16_t>(src), dest);
+}
+
+template<typename Char>
 Char *uint16_to_le(std::uint16_t src, Char *dest) {
     static_assert(sizeof(Char) == 1, "Char must be a byte-sized type");
     dest[1] = static_cast<Char>(static_cast<std::uint8_t>(src >> 8));
     dest[0] = static_cast<Char>(static_cast<std::uint8_t>(src));
     return dest;
+}
+
+template<typename Char>
+Char *int16_to_le(std::int16_t src, Char *dest) {
+    return uint16_to_le(static_cast<std::uint16_t>(src), dest);
 }
 
 template<typename Char>
@@ -139,12 +189,22 @@ std::uint16_t be_to_uint16(const Char *src) {
 }
 
 template<typename Char>
+std::int16_t be_to_int16(const Char *src) {
+    return static_cast<std::int16_t>(be_to_uint16(src));
+}
+
+template<typename Char>
 std::uint16_t le_to_uint16(const Char *src) {
     static_assert(sizeof(Char) == 1, "Char must be a byte-sized type");
     return static_cast<std::uint16_t>(
         static_cast<std::uint16_t>(static_cast<std::uint8_t>(src[1])) << 8
         | static_cast<std::uint16_t>(static_cast<std::uint8_t>(src[0]))
     );
+}
+
+template<typename Char>
+std::int16_t le_to_int16(const Char *src) {
+    return static_cast<std::int16_t>(le_to_uint16(src));
 }
 
 #endif
