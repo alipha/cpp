@@ -54,7 +54,7 @@ For more information, please refer to <http://unlicense.org/>
 
 std::vector<int> double_elements(const std::vector<int> &input) {
     std::vector<int> output;
-    output.reserve(input.size());
+    output.reserve(input.size());   // IMPORTANT: Undefined Behavior without reserving an appropriate size
 
     for(int element : input) {
         push_back_unchecked(output, element * 2);
