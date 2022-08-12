@@ -17,22 +17,23 @@ std::string foo(int) {
 
 
 int main() {
-    std::cout << std::is_same_v<function_class_type<decltype(foo)>, void> << std::endl;
-    std::cout << std::is_same_v<function_argument_n<0, decltype(foo)>, int> << std::endl;
-    std::cout << is_member_function<decltype(foo)> << std::endl;
-    std::cout << is_member_function<decltype(&bar::const_something)> << std::endl;
-    std::cout << is_const_member_function<decltype(foo)> << std::endl;
-    std::cout << is_const_member_function<decltype(&bar::const_something)> << std::endl;
-    std::cout << is_const_member_function<decltype(&bar::something)> << std::endl;
-    std::cout << is_lvalue_member_function<decltype(&bar::something)> << std::endl;
+    // note: function_class_type is possibly const-qualified or ref-qualified based upon the if the member function is qualified
+    std::cout << std::is_same_v<function_class_type<decltype(foo)>, void> << std::endl;     // true
+    std::cout << std::is_same_v<function_argument_n<0, decltype(foo)>, int> << std::endl;   // true
+    std::cout << is_member_function<decltype(foo)> << std::endl;                            // false
+    std::cout << is_member_function<decltype(&bar::const_something)> << std::endl;          // true
+    std::cout << is_const_member_function<decltype(foo)> << std::endl;                      // false
+    std::cout << is_const_member_function<decltype(&bar::const_something)> << std::endl;    // true
+    std::cout << is_const_member_function<decltype(&bar::something)> << std::endl;          // false
+    std::cout << is_lvalue_member_function<decltype(&bar::something)> << std::endl;         // true
     std::cout << std::endl;
 
     using func_ptr = int(*)(std::string, double);
     using mem_func_ptr = int(bar::*)(std::string, double);
     using const_rvalue_func_ptr = int(bar::*)(std::string, double) const &&;
 
-    std::cout << std::is_same_v<make_member_function_pointer<bar, func_ptr>, mem_func_ptr> << std::endl;
-    std::cout << std::is_same_v<make_const_rvalue_member_function_pointer<bar, func_ptr>, const_rvalue_func_ptr> << std::endl;
-    std::cout << std::is_same_v<make_function_pointer<mem_func_ptr>, func_ptr> << std::endl;
-    std::cout << std::is_same_v<make_function_pointer<const_rvalue_func_ptr>, func_ptr> << std::endl;
+    std::cout << std::is_same_v<make_member_function_pointer<bar, func_ptr>, mem_func_ptr> << std::endl;                        // true
+    std::cout << std::is_same_v<make_const_rvalue_member_function_pointer<bar, func_ptr>, const_rvalue_func_ptr> << std::endl;  // true
+    std::cout << std::is_same_v<make_function_pointer<mem_func_ptr>, func_ptr> << std::endl;                                    // true
+    std::cout << std::is_same_v<make_function_pointer<const_rvalue_func_ptr>, func_ptr> << std::endl;                           // true
 }
