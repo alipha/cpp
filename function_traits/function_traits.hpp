@@ -141,21 +141,24 @@ using function_argument_tuple = typename function_traits<Func>::argument_tuple;
 
 template<std::size_t N, typename Func>
 using function_argument_n = std::tuple_element_t<N, function_argument_tuple<Func>>;
+    
+template<typename Func>
+inline constexpr std::size_t function_argument_count = std::tuple_size_v<liph::function_argument_tuple<Func>>;
 
 template<typename Func>
-constexpr bool is_functor = function_traits<Func>::is_functor;
+inline constexpr bool is_functor = function_traits<Func>::is_functor;
 
 template<typename Func>
-constexpr bool is_member_function = function_traits<Func>::is_member;
+inline constexpr bool is_member_function = function_traits<Func>::is_member;
 
 template<typename Func>
-constexpr bool is_const_member_function = function_traits<Func>::is_const;
+inline constexpr bool is_const_member_function = function_traits<Func>::is_const;
 
 template<typename Func>
-constexpr bool is_lvalue_member_function = function_traits<Func>::is_lvalue_ref;
+inline constexpr bool is_lvalue_member_function = function_traits<Func>::is_lvalue_ref;
 
 template<typename Func>
-constexpr bool is_rvalue_member_function = function_traits<Func>::is_rvalue_ref;
+inline constexpr bool is_rvalue_member_function = function_traits<Func>::is_rvalue_ref;
 
 
 namespace detail {
