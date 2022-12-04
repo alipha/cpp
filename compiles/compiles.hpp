@@ -30,6 +30,7 @@ SOFTWARE.
 #define LIPH_WRAP(...) __VA_ARGS__
 #define LIPH_ARG(x) (liph_wrapper, (x))
 #define LIPH_DECLVAL(type) (liph_wrapper, std::declval<type>())
+#define LIPH_TYPE(type) decltype(liph_wrapper, std::declval<type>())
 
 #define LIPH_COMPILES(type, expr) ((liph::details::make_overloaded( \
                 [](long, auto) constexpr { return false; }, \
