@@ -42,7 +42,7 @@ bool validate_signature(std::tm &t, const std::string &message,
     ss << std::put_time(&utc, "%Y-%m-%d %H:%M") << ' ' << message;
     
     std::string line = ss.str();
-
+    std::cerr << "Validating: '" << line << "'\n";
     return crypto_sign_verify_detached(reinterpret_cast<const unsigned char*>(signature.data()), 
             reinterpret_cast<unsigned char*>(line.data()), line.size(), 
             reinterpret_cast<const unsigned char*>(public_key.data())) == 0;   
@@ -55,6 +55,8 @@ bool parse_received_message(const std::string &line) {
     char separator;
     std::stringstream line_ss(line);
     std::tm t = {};
+    std::time_t now_time = std::time(nullptr);
+    std::tm now = *std::localtime(&now_time);
 
     // parse date/time prefix
     if(!(line_ss >> std::get_time(&t, "%Y-%m-%d %H:%M:%S"))) {
@@ -64,12 +66,12 @@ bool parse_received_message(const std::string &line) {
         if(!(line_ss >> std::get_time(&t, "%H:%M:%S")))
             return false;
 
-        std::time_t now_time = std::time(nullptr);
-        std::tm now = *std::localtime(&now_time);
         t.tm_year = now.tm_year;
         t.tm_mon = now.tm_mon;
         t.tm_mday = now.tm_mday;
     }
+
+    t.tm_isdst = now.tm_isdst;
 
     // parse sender
     if(!(line_ss >> user >> separator))
@@ -168,6 +170,7 @@ void sign_message(const std::string &message) {
     std::string signature(crypto_sign_BYTES, '\0');
     std::string line = ss.str();
 
+    std::cerr << "signing: '" << line << "'\n";
     crypto_sign_detached(reinterpret_cast<unsigned char*>(signature.data()), nullptr, 
             reinterpret_cast<unsigned char*>(line.data()), line.size(), 
             reinterpret_cast<unsigned char*>(private_key.data()));
