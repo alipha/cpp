@@ -42,7 +42,7 @@ bool validate_signature(std::tm &t, const std::string &message,
     ss << std::put_time(&utc, "%Y-%m-%d %H:%M") << ' ' << message;
     
     std::string line = ss.str();
-    std::cerr << "Validating: '" << line << "'\n";
+    //std::cerr << "Validating: '" << line << "'\n";
     return crypto_sign_verify_detached(reinterpret_cast<const unsigned char*>(signature.data()), 
             reinterpret_cast<unsigned char*>(line.data()), line.size(), 
             reinterpret_cast<const unsigned char*>(public_key.data())) == 0;   
@@ -170,7 +170,7 @@ void sign_message(const std::string &message) {
     std::string signature(crypto_sign_BYTES, '\0');
     std::string line = ss.str();
 
-    std::cerr << "signing: '" << line << "'\n";
+    //std::cerr << "signing: '" << line << "'\n";
     crypto_sign_detached(reinterpret_cast<unsigned char*>(signature.data()), nullptr, 
             reinterpret_cast<unsigned char*>(line.data()), line.size(), 
             reinterpret_cast<unsigned char*>(private_key.data()));
