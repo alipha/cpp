@@ -33,41 +33,47 @@ namespace detail {
 }
 
 
-template<std::size_t Size, std::size_t Align = Size>
+template<typename Impl, std::size_t Size, std::size_t Align = Size>
 struct opaque_impl {
     static_assert(Align > 0, "Align must be non-zero");
     
-    opaque_impl(const opaque_impl &) = delete;
-    opaque_impl &operator=(const opaque_impl &) = delete;
-    
-    template<typename Impl>
-    constexpr opaque_impl(Impl &&impl) noexcept(noexcept(Impl(std::declval<Impl>()))) {
-        using T = std::remove_reference_t<Impl>;
-        validate<T>();  
-        new (storage) T(std::forward<Impl>(impl));
-    }
-    
-    template<typename Impl, typename... Args>
-    constexpr explicit opaque_impl(std::in_place_type_t<Impl>, Args&&... args) noexcept(noexcept(Impl(std::declval<Args>()...))) {
-        validate<Impl>();   
+    opaque_impl(const opaque_impl &other) noexcept(noexcept(Impl(std::declval<const Impl&>()))) : opaque_impl(*other) {}
+    opaque_impl(opaque_impl &&other) noexcept(noexcept(Impl(std::declval<Impl&&>()))) : opaque_impl(std::move(*other)) {}
+
+    template<typename... Args>
+    explicit opaque_impl(Args&&... args) noexcept(noexcept(Impl(std::declval<Args&&>()...))) {
+        validate();   
         new (storage) Impl(std::forward<Args>(args)...);
     }
     
-    template<typename Impl, typename U, typename... Args>
-    constexpr explicit opaque_impl(std::in_place_type_t<Impl>, std::initializer_list<U> il, Args&&... args) 
-            noexcept(noexcept(Impl(std::declval<std::initializer_list<U>>(), std::declval<Args>()...))) {
-        validate<Impl>();   
-        new (storage) Impl(il, std::forward<Args>(args)...);
+    template<typename T, std::enable_if_t<std::is_constructible_v<Impl, T>, int> = 0>
+    explicit opaque_impl(std::initializer_list<T> il) 
+            noexcept(noexcept(Impl(std::declval<std::initializer_list<T>>()))) {
+        validate();   
+        new (storage) Impl(il);
+    }
+
+    opaque_impl &operator=(const opaque_impl &other) noexcept(noexcept(*this = *other)) { return *this = *other; }
+    opaque_impl &operator=(opaque_impl &&other) noexcept(noexcept(*this = std::move(*other))) { return *this = std::move(*other); }
+
+    template<typename Arg>
+    opaque_impl &operator=(Arg &&arg) noexcept(noexcept(this->value() = std::declval<Arg&&>())) { 
+        value() = std::forward<Arg>(arg);
+        return *this;
     }
     
-    template<typename Impl>
-    Impl &get() noexcept { return *std::launder(reinterpret_cast<Impl*>(storage)); }
-    
-    template<typename Impl>
-    const Impl &get() const noexcept { return *std::launder(reinterpret_cast<const Impl*>(storage)); }
+    Impl &value() noexcept { return *reinterpret_cast<Impl*>(storage); }
+    const Impl &value() const noexcept { return *reinterpret_cast<const Impl*>(storage); }
+
+    Impl &operator*() noexcept { return value(); }
+    const Impl &operator*() const noexcept { return value(); }
+
+    Impl *operator->() noexcept { return &value(); }
+    const Impl *operator->() const noexcept { return &value(); }
+
+    ~opaque_impl() { value().~Impl(); }
     
 private:
-    template<typename Impl>
     constexpr void validate() noexcept {
         static_assert(sizeof(Impl) <= Size, "Size is not large enough for sizeof(Impl)");
         static_assert(detail::calc_alignment(Align) % alignof(Impl) == 0, "Alignment is not appropriate for Impl");
@@ -77,4 +83,3 @@ private:
 };
 
 #endif
-

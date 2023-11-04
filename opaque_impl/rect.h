@@ -23,7 +23,7 @@ public:
     void set_height(int);
     
 private:
-    opaque_impl<sizeof(int) * 2> impl;
+    opaque_impl<struct rect_impl, sizeof(int) * 2> impl;
 };
 
 #endif
