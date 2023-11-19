@@ -2,7 +2,9 @@
 #define LIPH_ENDIAN_HPP
 
 #include <cstdint>
-
+#if __cplusplus >= 202002L
+#include <bit>
+#endif
 
 /* gcc 8.1 and clang 9.0.0 and above optimize these to nops or bswaps with -O2.
    However, le_to_uint16 and be_to_uint16 are not optimal on gcc 8.1-9.3, but
@@ -206,5 +208,45 @@ template<typename Char>
 std::int16_t le_to_int16(const Char *src) {
     return static_cast<std::int16_t>(le_to_uint16(src));
 }
+
+template<bool Big>
+struct endian {
+	template<typename Char> static std::uint64_t read_uint64(const Char *src) { return be_to_uint64(src); }
+	template<typename Char> static std::uint32_t read_uint32(const Char *src) { return be_to_uint32(src); }
+	template<typename Char> static std::uint16_t read_uint16(const Char *src) { return be_to_uint16(src); }
+	template<typename Char> static std::int64_t read_int64(const Char *src) { return be_to_int64(src); }
+	template<typename Char> static std::int32_t read_int32(const Char *src) { return be_to_int32(src); }
+	template<typename Char> static std::int16_t read_int16(const Char *src) { return be_to_int16(src); }
+
+	template<typename Char> static Char *write_uint64(std::uint64_t src, Char *dest) { return uint64_to_be(src, dest); }
+	template<typename Char> static Char *write_uint32(std::uint32_t src, Char *dest) { return uint32_to_be(src, dest); }
+	template<typename Char> static Char *write_uint16(std::uint16_t src, Char *dest) { return uint16_to_be(src, dest); }
+	template<typename Char> static Char *write_int64(std::int64_t src, Char *dest) { return int64_to_be(src, dest); }
+	template<typename Char> static Char *write_int32(std::int32_t src, Char *dest) { return int32_to_be(src, dest); }
+	template<typename Char> static Char *write_int16(std::int16_t src, Char *dest) { return int16_to_be(src, dest); }
+};
+
+template<>
+struct endian<false> {
+	template<typename Char> static std::uint64_t read_uint64(const Char *src) { return le_to_uint64(src); }
+	template<typename Char> static std::uint32_t read_uint32(const Char *src) { return le_to_uint32(src); }
+	template<typename Char> static std::uint16_t read_uint16(const Char *src) { return le_to_uint16(src); }
+	template<typename Char> static std::int64_t read_int64(const Char *src) { return le_to_int64(src); }
+	template<typename Char> static std::int32_t read_int32(const Char *src) { return le_to_int32(src); }
+	template<typename Char> static std::int16_t read_int16(const Char *src) { return le_to_int16(src); }
+
+	template<typename Char> static Char *write_uint64(std::uint64_t src, Char *dest) { return uint64_to_le(src, dest); }
+	template<typename Char> static Char *write_uint32(std::uint32_t src, Char *dest) { return uint32_to_le(src, dest); }
+	template<typename Char> static Char *write_uint16(std::uint16_t src, Char *dest) { return uint16_to_le(src, dest); }
+	template<typename Char> static Char *write_int64(std::int64_t src, Char *dest) { return int64_to_le(src, dest); }
+	template<typename Char> static Char *write_int32(std::int32_t src, Char *dest) { return int32_to_le(src, dest); }
+	template<typename Char> static Char *write_int16(std::int16_t src, Char *dest) { return int16_to_le(src, dest); }
+};
+
+using big = endian<true>;
+using little = endian<false>;
+#if __cplusplus >= 202002L
+using native = endian<std::endian::native == std::endian::big>;
+#endif
 
 #endif
