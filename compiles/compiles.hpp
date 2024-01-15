@@ -28,18 +28,18 @@ SOFTWARE.
 #include <utility>
 
 #define LIPH_WRAP(...) __VA_ARGS__
-#define LIPH_ARG(x) (liph_wrapper, (x))
-#define LIPH_DECLVAL(type) (liph_wrapper, std::declval<type>())
-#define LIPH_TYPE(type) std::remove_reference_t<decltype(liph_wrapper, std::declval<type>())>
+#define LIPH_ARG(x) (dummy, (x))
+#define LIPH_DECLVAL(type) (dummy, std::declval<type>())
+#define LIPH_TYPE(type) std::remove_reference_t<decltype(dummy, std::declval<type>())>
 
-#define LIPH_COMPILES(type, expr) ((liph::details::make_overloaded( \
+#define LIPH_COMPILES(expr) ((liph::details::make_overloaded( \
                 [](long, auto) constexpr { return false; }, \
-                [](int, auto *liph_wrapper, std::void_t<decltype(sizeof(*liph_wrapper), (expr), true)>* = 0) constexpr { return true; } \
+                [](int, auto dummy, std::void_t<decltype(dummy, (expr), true)>* = 0) constexpr { return true; } \
         )) \
-        (0, static_cast<liph::details::wrapper<type>*>(nullptr)))
+        (0, 0))
 
-#define LIPH_HAS_TYPE_MEMBER(type, member) LIPH_COMPILES(type, std::declval<typename std::remove_cv_t<std::remove_reference_t<decltype(LIPH_DECLVAL(type))>>::member>())
-#define LIPH_HAS_MEMBER(type, member)      LIPH_COMPILES(type, &std::remove_cv_t<std::remove_reference_t<decltype(LIPH_DECLVAL(type))>>::member)
+#define LIPH_HAS_TYPE_MEMBER(type, member) LIPH_COMPILES(std::declval<typename std::remove_cv_t<std::remove_reference_t<decltype(LIPH_DECLVAL(type))>>::member>())
+#define LIPH_HAS_MEMBER(type, member)      LIPH_COMPILES(&std::remove_cv_t<std::remove_reference_t<decltype(LIPH_DECLVAL(type))>>::member)
 
 #define LIPH_CONCEPT(name, expr) \
     template<typename, typename = void> \
@@ -54,8 +54,6 @@ namespace details {
 template<typename... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 
 template<typename... Ts> constexpr auto make_overloaded(Ts... funcs) { return overloaded<Ts...> { funcs... }; }
-
-template<typename... Ts> struct wrapper {};
 
 }
 }
