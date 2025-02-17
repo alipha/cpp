@@ -1,0 +1,39 @@
+incomplete:
+
+https://godbolt.org/z/TKbe5ane3 - tag parameters
+https://godbolt.org/z/jd5YdvohM - create framework for selecting between exceptions and return a result type
+https://godbolt.org/z/16sYhsrcn - stack-allocated linked-list
+https://godbolt.org/z/r5P7xrPb7 - projection transparent comparator
+https://godbolt.org/z/cvxrc6Phj - unicode codepoint iterator
+https://godbolt.org/z/a9v8v4GET - flat file serialization
+https://godbolt.org/z/eWfG53GKf - determine exact function overload given T or T& params
+https://godbolt.org/z/8daWzYbvn - determine function overload from params
+https://godbolt.org/z/TPhj75cqM - type-erasure List and ListIterator example
+https://godbolt.org/z/Phvj6fadh - callable<int(int)> concept (check if functor matches params and return type)
+https://godbolt.org/z/14d5feaET - tuple_for
+https://godbolt.org/z/PoPb68aqh - approxEqual
+
+complete:
+
+https://godbolt.org/z/1hvnMEhMx - by value parameter
+https://godbolt.org/z/v6Ga3rvsK - std::unique_ptr transparent comparator
+https://godbolt.org/z/G3qqdj5Kv - StringBuilder
+https://godbolt.org/z/x1MEca4jj - transform_iterator
+https://godbolt.org/z/TceWK3Ta3 - enum_value (complete, but add visit multiple enums?) - https://godbolt.org/z/rfjv6rvYz or https://godbolt.org/z/Exoo7jr7s 
+https://godbolt.org/z/zao157WPG - str_literal
+https://godbolt.org/z/d5cP6ozWx - id_generator
+https://godbolt.org/z/dKe4jPY5e - bit_cast double to uint64_t and sort
+https://godbolt.org/z/a4cPMj5Mb - do_with_index
+https://godbolt.org/z/eoz5Pnqoj - partition_unique
+https://godbolt.org/z/6ssjs9oE7 - pretty_name
+https://godbolt.org/z/hK4vK9z4P - STRUCT - create structs in parameters or other expressions
+https://godbolt.org/z/P8acrWzPo - add EXTEND to the above
+https://godbolt.org/z/Pcn8E7PP7 - is_constexpr and is_call_constexpr (test functions for constexpr-ness)
+https://godbolt.org/z/jqGT3K5bx - "maybe" class - std::optional monad
+https://godbolt.org/z/eW838s5Ms - _bytes user-defined literal (turn hex literal into std::array)
+https://godbolt.org/z/e5vrMTExd - to_tuple
+https://godbolt.org/z/1YojY9q47 - hash macro
+
+fix:
+
+https://godbolt.org/z/GbofWjanq - liph_compiles - fix LIPH_TYPE

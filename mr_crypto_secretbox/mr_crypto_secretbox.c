@@ -40,7 +40,7 @@ static void mr_stream_xor(unsigned char *dest, const unsigned char *src, size_t 
  * Thusfar, part1 has been encrypted with a key which has only been influenced by part2, and so we need step 3 to
  * make the encryption of part1 to be influenced by every bit of part1 also.
  */
-void mr_crypto_secretbox_noauth(unsigned char *ciphertext, const unsigned char *msg, size_t len, const unsigned char *nonce, const unsigned char *key) {
+static void mr_crypto_secretbox_noauth_crypt(unsigned char *ciphertext, const unsigned char *msg, size_t len, const unsigned char *nonce, const unsigned char *key, int encrypt) {
     size_t part1_len = 32;
     size_t part2_len;
     const unsigned char *n = nonce ? nonce : zero_nonce;
@@ -59,13 +59,16 @@ void mr_crypto_secretbox_noauth(unsigned char *ciphertext, const unsigned char *
         return;
     }
 
-    mr_stream_xor(ciphertext, msg, 0, part1_len, msg + part1_len, part2_len, n, key, 1);
+    mr_stream_xor(ciphertext, msg, 0, part1_len, msg + part1_len, part2_len, n, key, encrypt ? 1 : 3);
     mr_stream_xor(ciphertext, msg, part1_len, part2_len, ciphertext, part1_len, n, key, 2);
-    mr_stream_xor(ciphertext, ciphertext, 0, part1_len, ciphertext + part1_len, part2_len, n, key, 3);
+    mr_stream_xor(ciphertext, ciphertext, 0, part1_len, ciphertext + part1_len, part2_len, n, key, encrypt ? 3 : 1);
 }
 
+void mr_crypto_secretbox_noauth(unsigned char *ciphertext, const unsigned char *msg, size_t len, const unsigned char *nonce, const unsigned char *key) {
+    mr_crypto_secretbox_noauth_crypt(ciphertext, msg, len, nonce, key, 1);
+}
 
 void mr_crypto_secretbox_noauth_open(unsigned char *plaintext, const unsigned char *ciphertext, size_t len, const unsigned char *nonce, const unsigned char *key) {
-    return mr_crypto_secretbox_noauth(plaintext, ciphertext, len, nonce, key);
+    mr_crypto_secretbox_noauth_crypt(plaintext, ciphertext, len, nonce, key, 0);
 }
 
